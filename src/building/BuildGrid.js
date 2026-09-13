@@ -1,37 +1,34 @@
 /**
- * BuildGrid.js — the uniform build grid and the pieces in it. MASTER_SPEC §6.1.
+ * BuildGrid.js — the build grid. MASTER_SPEC §9.1.
  *
- * Cells are integer (cx, cy, cz). Each cell holds at most one piece per slot:
- *   floor, ramp, cone, wall:north, wall:east, wall:south, wall:west
+ * Cells are integer (cx, cy, cz). World positions are COMPUTED from those indices and
+ * never accumulated, which is what makes "no cumulative drift, no arbitrary per-piece
+ * offsets" a structural property rather than a thing to be careful about.
+ *
+ * `revision` increments on every structural change so dependent systems (collision,
+ * renderer) can tell in O(1) that their derived state is stale.
  */
-import { BUILD } from '../core/Config.js';
+import { TILE, WALL_H } from '../core/Config.js';
 
 export const cellKey = (cx, cy, cz) => `${cx},${cy},${cz}`;
+const columnKey = (cx, cz) => `${cx},${cz}`;
 
-/** World position → the cell containing it. */
 export function worldToCell(x, y, z) {
   return {
-    cx: Math.floor(x / BUILD.tileSize),
-    cy: Math.floor(y / BUILD.wallHeight),
-    cz: Math.floor(z / BUILD.tileSize)
+    cx: Math.floor(x / TILE),
+    cy: Math.floor(y / WALL_H),
+    cz: Math.floor(z / TILE)
   };
 }
 
-/** Cell → world position of its minimum corner. */
 export function cellToWorld(cx, cy, cz) {
-  return { x: cx * BUILD.tileSize, y: cy * BUILD.wallHeight, z: cz * BUILD.tileSize };
+  return { x: cx * TILE, y: cy * WALL_H, z: cz * TILE };
 }
 
-/** Cell → world position of its centre. */
 export function cellCentre(cx, cy, cz) {
-  return {
-    x: (cx + 0.5) * BUILD.tileSize,
-    y: (cy + 0.5) * BUILD.wallHeight,
-    z: (cz + 0.5) * BUILD.tileSize
-  };
+  return { x: (cx + 0.5) * TILE, y: (cy + 0.5) * WALL_H, z: (cz + 0.5) * TILE };
 }
 
-/** The neighbouring cell through a given wall face. */
 export function neighbourCell(cell, direction) {
   switch (direction) {
     case 'north': return { cx: cell.cx, cy: cell.cy, cz: cell.cz - 1 };
@@ -48,21 +45,26 @@ export const OPPOSITE = Object.freeze({
 
 export class BuildGrid {
   constructor() {
-    /** @type {Map<string, Map<string, import('./BuildPiece.js').BuildPiece>>} */
-    this.cells = new Map();
-    /** @type {Map<number, import('./BuildPiece.js').BuildPiece>} */
+    this.cells = new Map();        // cellKey -> Map<slot, piece>
     this.piecesById = new Map();
+    this.columns = new Map();      // columnKey -> Set<piece>, for vertical queries
+    /** Bumped on every add, remove or edit. Derived systems watch this. */
+    this.revision = 0;
   }
 
   get pieceCount() {
     return this.piecesById.size;
   }
 
+  /** Call after any change that alters piece geometry, including edits. */
+  touch() {
+    this.revision++;
+  }
+
   getCell(cx, cy, cz) {
     return this.cells.get(cellKey(cx, cy, cz)) ?? null;
   }
 
-  /** The piece occupying a slot, or null. */
   getPiece(cell, slot) {
     return this.getCell(cell.cx, cell.cy, cell.cz)?.get(slot) ?? null;
   }
@@ -71,10 +73,14 @@ export class BuildGrid {
     return this.getPiece(cell, slot) !== null;
   }
 
-  /** All pieces in a cell. */
   piecesInCell(cx, cy, cz) {
     const map = this.getCell(cx, cy, cz);
     return map ? [...map.values()] : [];
+  }
+
+  /** Every piece in the vertical column above and below (cx, cz). */
+  piecesByColumn(cx, cz) {
+    return this.columns.get(columnKey(cx, cz)) ?? [];
   }
 
   add(piece) {
@@ -89,6 +95,12 @@ export class BuildGrid {
     }
     slots.set(piece.slot, piece);
     this.piecesById.set(piece.id, piece);
+
+    const ck = columnKey(piece.cell.cx, piece.cell.cz);
+    if (!this.columns.has(ck)) this.columns.set(ck, []);
+    this.columns.get(ck).push(piece);
+
+    this.touch();
     return piece;
   }
 
@@ -100,9 +112,18 @@ export class BuildGrid {
       if (slots.size === 0) this.cells.delete(key);
     }
     this.piecesById.delete(piece.id);
+
+    const ck = columnKey(piece.cell.cx, piece.cell.cz);
+    const column = this.columns.get(ck);
+    if (column) {
+      const i = column.indexOf(piece);
+      if (i >= 0) column.splice(i, 1);
+      if (column.length === 0) this.columns.delete(ck);
+    }
+
+    this.touch();
   }
 
-  /** Advance every piece's build ramp (§6.4). */
   update(dt) {
     for (const piece of this.piecesById.values()) piece.update(dt);
   }
@@ -114,5 +135,7 @@ export class BuildGrid {
   clear() {
     this.cells.clear();
     this.piecesById.clear();
+    this.columns.clear();
+    this.touch();
   }
 }

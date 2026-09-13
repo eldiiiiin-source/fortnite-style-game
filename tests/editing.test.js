@@ -1,113 +1,154 @@
-/** Edit grid patterns and the edit state machine. MASTER_SPEC §7. */
+/** Per-type edit grids and the edit state machine. MASTER_SPEC §10. */
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  resolvePattern, isValidSelection, selectionKey, patternsFor, renderSelection,
-  WALL_PATTERNS, FLOOR_PATTERNS, RAMP_PATTERNS, CONE_PATTERNS
+  resolvePattern, isValidSelection, isValidTile, tileCount, gridFor,
+  patternsFor, renderSelection, tileToRowCol, rowColToTile,
+  FLOOR_PATTERNS, CONE_PATTERNS, RAMP_PATTERNS
 } from '../src/editing/EditPatterns.js';
 import { EditController, EditState, EditReject } from '../src/editing/EditController.js';
 import { BuildGrid } from '../src/building/BuildGrid.js';
 import { BuildPiece, resetPieceIds } from '../src/building/BuildPiece.js';
 import { EventBus } from '../src/core/EventBus.js';
-import { EDIT, MATERIALS } from '../src/core/Config.js';
-
-const makePiece = (type = 'wall', ownerId = 1) =>
-  new BuildPiece({ type, material: 'wood', cell: { cx: 0, cy: 0, cz: 0 }, ownerId });
+import { EDIT, EDIT_GRIDS } from '../src/core/Config.js';
 
 beforeEach(() => resetPieceIds());
 
-describe('§7.1 selection keys', () => {
-  it('is order-independent and de-duplicated', () => {
-    expect(selectionKey([7, 6])).toBe('6,7');
-    expect(selectionKey([6, 7, 6])).toBe('6,7');
-    expect(selectionKey([])).toBe('');
+const piece = (type, ownerId = 1) =>
+  new BuildPiece({ type, material: 'brick', cell: { cx: 0, cy: 0, cz: 0 }, ownerId });
+
+describe('§10.2 grids are per piece type, not uniform', () => {
+  it('reports each type its own grid', () => {
+    expect(gridFor('wall')).toEqual({ cols: 3, rows: 3, tiles: 9 });
+    expect(gridFor('floor')).toEqual({ cols: 2, rows: 2, tiles: 4 });
+    expect(gridFor('cone')).toEqual({ cols: 2, rows: 2, tiles: 4 });
+    expect(gridFor('ramp')).toEqual({ cols: 2, rows: 3, tiles: 6 });
+  });
+
+  it('rejects a tile index outside the type\'s own grid', () => {
+    expect(isValidTile('wall', 8)).toBe(true);
+    expect(isValidTile('floor', 8)).toBe(false);   // 2x2 has no tile 8
+    expect(isValidTile('cone', 4)).toBe(false);
+    expect(isValidTile('ramp', 6)).toBe(false);    // 3x2 has tiles 0-5
+    expect(isValidTile('ramp', 5)).toBe(true);
+  });
+
+  it('rejects a whole selection containing an out-of-grid tile', () => {
+    expect(isValidSelection('floor', [0, 8])).toBe(false);
+    expect(isValidSelection('ramp', [0, 7])).toBe(false);
+  });
+
+  it('maps tiles to row/col per the type\'s own width', () => {
+    expect(tileToRowCol('wall', 4)).toEqual({ row: 1, col: 1 });
+    expect(tileToRowCol('floor', 3)).toEqual({ row: 1, col: 1 });
+    expect(tileToRowCol('ramp', 5)).toEqual({ row: 2, col: 1 });
+    expect(rowColToTile('ramp', 2, 1)).toBe(5);
+    expect(rowColToTile('ramp', 3, 0)).toBe(-1);
+  });
+
+  it('counts tiles per type', () => {
+    expect(tileCount('wall')).toBe(9);
+    expect(tileCount('floor')).toBe(4);
+    expect(tileCount('ramp')).toBe(6);
   });
 });
 
-describe('§7.3 wall patterns', () => {
-  it('resolves the door as tiles 6 and 7', () => {
-    const p = resolvePattern('wall', [6, 7]);
+describe('§10.3 wall patterns — 3x3', () => {
+  it('resolves the door as the middle column bottom two tiles', () => {
+    const p = resolvePattern('wall', [4, 7]);
     expect(p.name).toBe('Door');
+    expect(p.walkable).toBe(true);
   });
 
-  it('resolves a window as the centre tile', () => {
-    expect(resolvePattern('wall', [4]).name).toBe('Window');
+  it('resolves the three-tile opening as the full middle column', () => {
+    const p = resolvePattern('wall', [1, 4, 7]);
+    expect(p.walkable).toBe(true);
+  });
+
+  it('marks a bottom row opening as NOT walkable standing', () => {
+    const p = resolvePattern('wall', [6, 7, 8]);
+    expect(p.walkable).toBeUndefined();
+  });
+
+  it('supports the required wall pattern vocabulary', () => {
+    const names = patternsFor('wall').map((p) => p.name.toLowerCase()).join(' ');
+    for (const required of ['window', 'door', 'corner', 'half wall', 'top row', 'arch']) {
+      expect(names).toContain(required);
+    }
   });
 
   it('treats an empty selection as the full wall', () => {
     expect(resolvePattern('wall', []).name).toBe('Full wall');
   });
-
-  it('offers the nine documented wall patterns', () => {
-    expect(Object.keys(WALL_PATTERNS)).toHaveLength(9);
-  });
 });
 
-describe('§7.4 - §7.6 other piece patterns', () => {
-  it('deletes the piece on a full floor drop', () => {
-    const p = resolvePattern('floor', [0, 1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(p.deletesPiece).toBe(true);
-  });
-
-  it('accepts a quarter hole at any corner', () => {
-    for (const corner of [0, 2, 6, 8]) {
-      expect(isValidSelection('floor', [corner])).toBe(true);
+describe('§10.5 - §10.7 floor, cone and ramp patterns', () => {
+  it('offers all four floor quarters and four halves', () => {
+    expect(Object.keys(FLOOR_PATTERNS)).toHaveLength(10);
+    for (const q of [0, 1, 2, 3]) expect(isValidSelection('floor', [q])).toBe(true);
+    for (const h of [[0, 1], [2, 3], [0, 2], [1, 3]]) {
+      expect(isValidSelection('floor', h)).toBe(true);
     }
   });
 
-  it('resolves both ramp halves', () => {
-    expect(resolvePattern('ramp', [0, 3, 6]).name).toBe('Half ramp (left)');
-    expect(resolvePattern('ramp', [2, 5, 8]).name).toBe('Half ramp (right)');
+  it('deletes the floor when every quarter is removed', () => {
+    expect(resolvePattern('floor', [0, 1, 2, 3]).deletesPiece).toBe(true);
   });
 
-  it('offers the documented pattern counts', () => {
-    expect(Object.keys(FLOOR_PATTERNS)).toHaveLength(8);
-    expect(Object.keys(RAMP_PATTERNS)).toHaveLength(5);
-    expect(Object.keys(CONE_PATTERNS)).toHaveLength(3);
+  it('offers directional cone edits', () => {
+    expect(Object.keys(CONE_PATTERNS)).toHaveLength(10);
+    expect(resolvePattern('cone', [0, 1]).name).toContain('north');
+  });
+
+  it('offers stair variants on the 3x2 ramp grid', () => {
+    expect(Object.keys(RAMP_PATTERNS)).toHaveLength(10);
+    expect(resolvePattern('ramp', [0, 2, 4]).name).toContain('left');
+    expect(resolvePattern('ramp', [1, 3, 5]).name).toContain('right');
+    expect(resolvePattern('ramp', [0, 1]).flipped).toBe(true);
   });
 });
 
-describe('§7.7 rejected selections', () => {
-  it('rejects the selections named in references/editing/01-edit-patterns.md', () => {
-    expect(isValidSelection('wall', [0, 1, 2])).toBe(false);   // top row only
-    expect(isValidSelection('wall', [1])).toBe(false);          // purposeless hole
-    expect(isValidSelection('wall', [0, 4, 8])).toBe(false);    // diagonal
-    expect(isValidSelection('floor', [1, 3, 5, 7])).toBe(false); // cross
+describe('§10.3 invalid patterns are rejected', () => {
+  it('rejects unlisted selections', () => {
+    expect(isValidSelection('wall', [0, 4, 8])).toBe(false);   // diagonal
+    expect(isValidSelection('wall', [2])).toBe(false);
+    expect(isValidSelection('floor', [0, 3])).toBe(false);     // diagonal quarters
+    expect(isValidSelection('ramp', [0, 5])).toBe(false);
   });
 
   it('rejects a pattern valid for a different piece type', () => {
-    // 6,7 is a wall door, but it is not a floor pattern.
-    expect(isValidSelection('wall', [6, 7])).toBe(true);
-    expect(isValidSelection('floor', [6, 7])).toBe(false);
+    expect(isValidSelection('wall', [4, 7])).toBe(true);
+    expect(isValidSelection('ramp', [4, 7])).toBe(false);
   });
 
-  it('is an allow list, so an unknown piece type resolves to nothing', () => {
-    expect(resolvePattern('pyramidRamp', [])).toBeNull();
-  });
-});
-
-describe('EditPatterns helpers', () => {
-  it('renders a selection as the reference diagram', () => {
-    expect(renderSelection([6, 7])).toBe('# # #\n# # #\n· · #');
-  });
-
-  it('lists every pattern for a type with its key', () => {
-    const list = patternsFor('cone');
-    expect(list).toHaveLength(3);
-    expect(list.map((p) => p.name)).toContain('Quarter cone');
+  it('rejects an unknown piece type', () => {
+    expect(resolvePattern('roofTrap', [])).toBeNull();
   });
 });
 
-describe('§7.2 edit flow', () => {
-  let grid, bus, editor, piece;
+describe('EditPatterns rendering', () => {
+  it('renders at the type\'s own grid size', () => {
+    expect(renderSelection('wall', [4, 7])).toBe('# # #\n# · #\n# · #');
+    expect(renderSelection('floor', [0])).toBe('· #\n# #');
+    expect(renderSelection('ramp', [0, 1])).toBe('· ·\n# #\n# #');
+  });
+});
+
+describe('§10 edit state machine', () => {
+  let grid, bus, editor, wall;
 
   beforeEach(() => {
     grid = new BuildGrid();
     bus = new EventBus();
     editor = new EditController(grid, bus);
-    piece = grid.add(makePiece('wall', 1));
+    wall = grid.add(piece('wall', 1));
   });
 
-  it('refuses to edit a piece owned by someone else', () => {
+  const enterSelecting = (p = wall) => {
+    editor.begin(p, 1, 2);
+    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
+  };
+
+  it('refuses a piece owned by someone else', () => {
     const enemy = grid.add(new BuildPiece({
       type: 'wall', material: 'wood', cell: { cx: 1, cy: 0, cz: 0 }, direction: 'east', ownerId: 2
     }));
@@ -115,135 +156,154 @@ describe('§7.2 edit flow', () => {
     expect(editor.lastReject).toBe(EditReject.NOT_OWNER);
   });
 
-  it('refuses to edit beyond 8 m', () => {
-    expect(editor.begin(piece, 1, EDIT.range + 0.1)).toBe(false);
+  it('refuses a piece out of range', () => {
+    expect(editor.begin(wall, 1, EDIT.range + 0.5)).toBe(false);
     expect(editor.lastReject).toBe(EditReject.OUT_OF_RANGE);
   });
 
-  it('reaches SELECTING after the 0.10 s enter gate', () => {
-    editor.begin(piece, 1, 2);
+  it('reaches SELECTING after the enter gate', () => {
+    editor.begin(wall, 1, 2);
     expect(editor.state).toBe(EditState.ENTERING);
-    editor.update(0.05, { distanceToTarget: 2 });
-    expect(editor.state).toBe(EditState.ENTERING);
-    editor.update(0.06, { distanceToTarget: 2 });
+    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
     expect(editor.state).toBe(EditState.SELECTING);
   });
 
   it('applies a valid pattern without touching HP, material or owner', () => {
-    const hpBefore = piece.hp;
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    editor.selectTile(6);
-    editor.selectTile(7);
-    const result = editor.confirm();
-
-    expect(result.ok).toBe(true);
-    expect(piece.editPattern.name).toBe('Door');
-    expect(piece.hp).toBe(hpBefore);            // §7.7 rule 1
-    expect(piece.material).toBe('wood');
-    expect(piece.ownerId).toBe(1);
-    expect(editor.state).toBe(EditState.IDLE);
+    const hp = wall.hp;
+    enterSelecting();
+    editor.dragTile(4);
+    editor.dragTile(7);
+    expect(editor.confirm().ok).toBe(true);
+    expect(wall.editPattern.name).toBe('Door');
+    expect(wall.hp).toBe(hp);
+    expect(wall.material).toBe('brick');
+    expect(wall.ownerId).toBe(1);
   });
 
-  it('leaves the piece unchanged on an invalid selection', () => {
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    editor.selectTile(0);
-    editor.selectTile(4);
-    editor.selectTile(8); // diagonal — not in the allow list
-    const result = editor.confirm();
-
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe(EditReject.INVALID_PATTERN);
-    expect(piece.editPattern).toBeNull();
-    expect(piece.destroyed).toBe(false);
+  it('leaves the piece untouched on an invalid selection', () => {
+    enterSelecting();
+    editor.dragTile(0);
+    editor.dragTile(4);
+    editor.dragTile(8);
+    const r = editor.confirm();
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe(EditReject.INVALID_PATTERN);
+    expect(wall.editPattern).toBeNull();
   });
 
-  it('costs and refunds no material', () => {
-    // Editing has no material parameter at all — assert the piece's own material is intact
-    // and that the pattern carries no cost field.
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    editor.selectTile(4);
-    const result = editor.confirm();
-    expect(result.pattern.cost).toBeUndefined();
-    expect(MATERIALS[piece.material].fullHp).toBe(150);
-  });
-
-  it('deletes the piece on a full floor drop and removes it from the grid', () => {
+  it('ignores a tile outside the piece\'s grid', () => {
     const floor = grid.add(new BuildPiece({
       type: 'floor', material: 'wood', cell: { cx: 2, cy: 0, cz: 0 }, ownerId: 1
     }));
-    editor.begin(floor, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    for (let i = 0; i < 9; i++) editor.selectTile(i);
-    const result = editor.confirm();
-
-    expect(result.ok).toBe(true);
-    expect(floor.destroyed).toBe(true);
-    expect(grid.getPiece({ cx: 2, cy: 0, cz: 0 }, 'floor')).toBeNull();
+    enterSelecting(floor);
+    expect(editor.dragTile(8)).toBe(false);     // 2x2 grid has no tile 8
+    expect(editor.selection.size).toBe(0);
   });
 
-  it('cancels when the player walks out of range', () => {
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    expect(editor.isEditing).toBe(true);
-    editor.update(1 / 30, { distanceToTarget: EDIT.range + 1 });
-    expect(editor.isEditing).toBe(false);
-    expect(editor.lastReject).toBe(EditReject.OUT_OF_RANGE);
+  it('takes each tile at most once per drag', () => {
+    enterSelecting();
+    expect(editor.dragTile(4)).toBe(true);
+    expect(editor.dragTile(4)).toBe(false);
+    expect(editor.selection.size).toBe(1);
+    // A NEW stroke over the same tile is idempotent: it stays selected, not toggled off.
+    editor.endDrag();
+    expect(editor.dragTile(4)).toBe(true);
+    expect(editor.selection.size).toBe(1);
   });
 
-  it('cancels if the target is destroyed mid-edit', () => {
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    piece.destroyed = true;
-    editor.update(1 / 30, { distanceToTarget: 2 });
-    expect(editor.isEditing).toBe(false);
+  it('toggles tiles on click', () => {
+    enterSelecting();
+    editor.toggleTile(4);
+    expect(editor.selection.has(4)).toBe(true);
+    editor.toggleTile(4);
+    expect(editor.selection.has(4)).toBe(false);
   });
 
   it('resets the selection back to the full piece', () => {
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    editor.selectTile(6);
-    editor.selectTile(7);
-    editor.reset();
+    enterSelecting();
+    editor.dragTile(4);
+    editor.dragTile(7);
+    editor.resetSelection();
     expect(editor.selectionKey).toBe('');
     expect(editor.confirm().pattern.name).toBe('Full wall');
-    expect(piece.editPattern).toBeNull();
+    expect(wall.editPattern).toBeNull();
+  });
+
+  it('resets an edited piece instantly, without entering the flow', () => {
+    enterSelecting();
+    editor.dragTile(4);
+    editor.dragTile(7);
+    editor.confirm();
+    expect(wall.editPattern).not.toBeNull();
+
+    const r = editor.resetPiece(wall, 1, 2);
+    expect(r.ok).toBe(true);
+    expect(wall.editPattern).toBeNull();
+    expect(editor.isEditing).toBe(false);
+  });
+
+  it('refuses to reset a piece owned by someone else', () => {
+    const enemy = grid.add(new BuildPiece({
+      type: 'wall', material: 'wood', cell: { cx: 3, cy: 0, cz: 0 }, direction: 'east', ownerId: 2
+    }));
+    expect(editor.resetPiece(enemy, 1, 2).ok).toBe(false);
+  });
+
+  it('cancels when the player walks out of range — never stuck', () => {
+    enterSelecting();
+    expect(editor.isEditing).toBe(true);
+    editor.update(1 / 60, { distanceToTarget: EDIT.range + 1 });
+    expect(editor.isEditing).toBe(false);
+    expect(editor.state).toBe(EditState.IDLE);
+  });
+
+  it('cancels when the target is destroyed mid-edit', () => {
+    enterSelecting();
+    wall.destroyed = true;
+    editor.update(1 / 60, { distanceToTarget: 2 });
+    expect(editor.isEditing).toBe(false);
   });
 
   it('starts a re-edit from the piece\'s existing pattern', () => {
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
-    editor.selectTile(6);
-    editor.selectTile(7);
+    enterSelecting();
+    editor.dragTile(4);
+    editor.dragTile(7);
     editor.confirm();
-
-    editor.begin(piece, 1, 2);
-    expect(editor.selectionKey).toBe('6,7');
+    editor.begin(wall, 1, 2);
+    expect(editor.selectionKey).toBe('4,7');
   });
 
-  it('completes a door edit inside the 0.25 s budget', () => {
-    const dt = 1 / 30;
-    editor.begin(piece, 1, 2);
+  it('deletes the piece when every tile is selected on a floor', () => {
+    const floor = grid.add(new BuildPiece({
+      type: 'floor', material: 'wood', cell: { cx: 4, cy: 0, cz: 0 }, ownerId: 1
+    }));
+    enterSelecting(floor);
+    for (let i = 0; i < EDIT_GRIDS.floor.tiles; i++) editor.dragTile(i);
+    expect(editor.confirm().ok).toBe(true);
+    expect(floor.destroyed).toBe(true);
+    expect(grid.getPiece({ cx: 4, cy: 0, cz: 0 }, 'floor')).toBeNull();
+  });
+
+  it('completes the flow inside the responsiveness budget', () => {
+    const dt = 1 / 60;
+    editor.begin(wall, 1, 2);
     let elapsed = 0;
     while (editor.state === EditState.ENTERING) {
       editor.update(dt, { distanceToTarget: 2 });
       elapsed += dt;
     }
-    editor.selectTile(6);
-    editor.selectTile(7);
+    editor.dragTile(4);
+    editor.dragTile(7);
     editor.confirm();
     elapsed += EDIT.confirmTime;
     expect(elapsed).toBeLessThanOrEqual(EDIT.maxFlowTime);
   });
 
-  it('emits started and confirmed events', () => {
+  it('emits started and confirmed', () => {
     const seen = [];
     bus.on('edit:started', () => seen.push('started'));
     bus.on('edit:confirmed', () => seen.push('confirmed'));
-    editor.begin(piece, 1, 2);
-    editor.update(EDIT.enterTime, { distanceToTarget: 2 });
+    enterSelecting();
     editor.confirm();
     expect(seen).toEqual(['started', 'confirmed']);
   });

@@ -3,7 +3,7 @@
  *
  * Pure data + HP logic. No three.js here: this must run in Node for tests (CLAUDE.md).
  */
-import { MATERIALS, BUILD } from '../core/Config.js';
+import { MATERIALS, TILE, WALL_H } from '../core/Config.js';
 import { clamp, lerp } from '../core/MathUtils.js';
 
 let nextPieceId = 1;
@@ -17,7 +17,7 @@ export class BuildPiece {
   /**
    * @param {object} opts
    * @param {string} opts.type      'wall' | 'floor' | 'ramp' | 'cone'
-   * @param {string} opts.material  'wood' | 'stone' | 'metal'
+   * @param {string} opts.material  'wood' | 'brick' | 'metal'
    * @param {{cx:number,cy:number,cz:number}} opts.cell
    * @param {string} [opts.direction]  wall face, or ramp/cone facing
    * @param {number} opts.ownerId
@@ -82,12 +82,12 @@ export class BuildPiece {
     return this.type === 'wall' ? `wall:${this.direction}` : this.type;
   }
 
-  /** World-space centre of the piece's cell. */
+  /** World-space centre of the piece's cell, computed from indices (no drift). */
   get worldCentre() {
     return {
-      x: (this.cell.cx + 0.5) * BUILD.tileSize,
-      y: (this.cell.cy + 0.5) * BUILD.wallHeight,
-      z: (this.cell.cz + 0.5) * BUILD.tileSize
+      x: (this.cell.cx + 0.5) * TILE,
+      y: (this.cell.cy + 0.5) * WALL_H,
+      z: (this.cell.cz + 0.5) * TILE
     };
   }
 

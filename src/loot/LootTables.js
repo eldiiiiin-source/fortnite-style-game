@@ -3,13 +3,29 @@
  *
  * Every roll draws from the match's `loot` RNG stream so a match replays identically.
  */
-import {
-  LOOT_RARITY_WEIGHTS, LOOT_CLASS_WEIGHTS, LOOT_SPAWN_CHANCE, WEAPONS, CONSUMABLES
-} from '../core/Config.js';
+import { WEAPONS, CONSUMABLES } from '../core/Config.js';
 import { Weapon } from '../combat/Weapon.js';
 
+/** §16.4 — small shield, large shield, medkit. */
 const CONSUMABLE_WEIGHTS = Object.freeze({
-  bandage: 34, smallShield: 30, medkit: 18, shieldPotion: 18
+  smallShield: 40, largeShield: 30, medkit: 30
+});
+
+/** §16.3 rarity weights. Chests are better than floor loot. */
+export const LOOT_RARITY_WEIGHTS = Object.freeze({
+  floor: { common: 45, uncommon: 32, rare: 16, epic: 5.5, legendary: 1.5 },
+  chest: { common: 18, uncommon: 34, rare: 30, epic: 14, legendary: 4 }
+});
+
+/** Weapon class weights. POIs are richer than countryside (MAP_SPEC §14). */
+export const LOOT_CLASS_WEIGHTS = Object.freeze({
+  poi:        { assaultRifle: 24, smg: 20, pumpShotgun: 13, tacticalShotgun: 13, pistol: 12, boltSniper: 11, rocketLauncher: 7 },
+  landmark:   { assaultRifle: 26, smg: 22, pumpShotgun: 12, tacticalShotgun: 12, pistol: 18, boltSniper: 8, rocketLauncher: 2 },
+  countryside:{ assaultRifle: 26, smg: 22, pumpShotgun: 12, tacticalShotgun: 12, pistol: 19, boltSniper: 8, rocketLauncher: 1 }
+});
+
+export const LOOT_SPAWN_CHANCE = Object.freeze({
+  chest: 0.60, floor: 0.75, ammoBox: 0.55, countrysideProp: 0.35
 });
 
 /** Ammo handed out alongside a weapon — always the matching type (§8.3). */
@@ -23,11 +39,11 @@ export function rollRarity(rng, source = 'floor') {
 }
 
 /** Roll a weapon class for a POI tier (MAP_SPEC §6.3). */
-export function rollWeaponClass(rng, tier = 'outside') {
-  return rng.weighted(LOOT_CLASS_WEIGHTS[tier] ?? LOOT_CLASS_WEIGHTS.outside);
+export function rollWeaponClass(rng, tier = 'countryside') {
+  return rng.weighted(LOOT_CLASS_WEIGHTS[tier] ?? LOOT_CLASS_WEIGHTS.countryside);
 }
 
-export function rollWeapon(rng, { source = 'floor', tier = 'outside', excludeClasses = [] } = {}) {
+export function rollWeapon(rng, { source = 'floor', tier = 'countryside', excludeClasses = [] } = {}) {
   let weaponId;
   let guard = 0;
   do {
@@ -52,7 +68,7 @@ export function ammoFor(weaponId) {
 /**
  * Floor loot: one weapon or one consumable, plus matching ammo (§8.1).
  */
-export function rollFloorLoot(rng, { tier = 'outside' } = {}) {
+export function rollFloorLoot(rng, { tier = 'countryside' } = {}) {
   const items = [];
   if (rng.chance(0.72)) {
     const w = rollWeapon(rng, { source: 'floor', tier });
@@ -69,7 +85,7 @@ export function rollFloorLoot(rng, { tier = 'outside' } = {}) {
  *
  * @param {boolean} guaranteeWeapon  §8.3 — the player's first chest of the match
  */
-export function rollChest(rng, { tier = 'major', guaranteeWeapon = false } = {}) {
+export function rollChest(rng, { tier = 'poi', guaranteeWeapon = false } = {}) {
   const items = [];
   const usedClasses = [];
 

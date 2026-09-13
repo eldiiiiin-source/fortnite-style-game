@@ -1,226 +1,258 @@
 /**
- * Game.js — wires the systems together and owns one simulation tick.
+ * Game.js — system wiring and one simulation tick.
  *
- * The tick order matters and is fixed: input -> player -> building -> editing ->
- * combat -> world. Nothing here holds gameplay numbers; everything comes from Config.
+ * Tick order is fixed and deliberate (§27 phase order):
+ *   input -> player -> collision -> building -> editing -> combat -> world
+ *
+ * Holds no gameplay numbers; everything comes from Config.
  */
-import { SIM, BUILD, MATERIAL_ORDER, PIECE_TYPES, DIRECTIONS, EDIT, WORLD } from './core/Config.js';
+import { SIM, PIECE_TYPES, MATERIAL_ORDER, DIRECTIONS, EDIT, MATERIAL_CAP } from './core/Config.js';
 import { EventBus, Events } from './core/EventBus.js';
 import { MatchRandom } from './core/Random.js';
-import { BuildGrid } from './building/BuildGrid.js';
-import { placePiece, PlacementResult } from './building/Placement.js';
-import { updateSupport } from './building/StructureGraph.js';
-import { resolveBuildTarget, resolveEditTarget } from './building/BuildTargeting.js';
-import { cellCentre } from './building/BuildGrid.js';
+import { Input } from './core/Input.js';
+import { BuildGrid, worldToCell, cellCentre } from './building/BuildGrid.js';
+import { BuildPiece } from './building/BuildPiece.js';
+import { CollisionWorld } from './building/CollisionWorld.js';
+import { PlacementQueue } from './building/PlacementQueue.js';
+import { validatePlacement, placePiece } from './building/Placement.js';
+import { resolveBuildTarget } from './building/BuildTargeting.js';
 import { EditController } from './editing/EditController.js';
 import { PlayerController } from './player/PlayerController.js';
 import { PlayerCamera } from './player/PlayerCamera.js';
+import { aimRayFrom } from './player/AimRay.js';
 import { Health } from './combat/Health.js';
 import { Inventory, Weapon } from './combat/Weapon.js';
-import { TerrainGenerator } from './world/TerrainGenerator.js';
-import { Storm } from './world/Storm.js';
+import { TestEnvironment } from './world/TestEnvironment.js';
 
 export class Game {
-  constructor({ seed = 1337, input = null } = {}) {
+  constructor({ seed = 1337, input = null, settings = null } = {}) {
     this.bus = new EventBus();
     this.rng = new MatchRandom(seed);
-    this.input = input;
+    this.input = input ?? new Input();
+    this.settings = settings;
     this.time = 0;
 
-    this.terrain = new TerrainGenerator(seed);
+    this.terrain = new TestEnvironment();
     this.grid = new BuildGrid();
-    this.storm = new Storm(this.rng.storm, this.bus);
+    this.collision = new CollisionWorld(this.grid);
 
     this.player = new PlayerController({
       terrainHeightAt: (x, z) => this.terrain.heightAt(x, z),
-      waterDepthAt: (x, z) => this.terrain.waterDepth(x, z),
+      waterDepthAt: (x, z) => this.terrain.waterDepthAt(x, z),
+      collision: this.collision,
       bus: this.bus,
       id: 1
     });
     this.health = new Health(this.bus, 1);
     this.inventory = new Inventory();
-    this.camera = new PlayerCamera();
-    this.editor = new EditController(this.grid, this.bus);
 
-    // Build-mode state (§6.6).
+    // Camera collision reads the same CollisionWorld the player does (§7.1).
+    this.camera = new PlayerCamera(
+      (origin, dir, maxDist, radius) => this.collision.sphereCast(origin, dir, maxDist, radius)
+    );
+    this.editor = new EditController(this.grid, this.bus, settings);
+    this.placementQueue = new PlacementQueue();
+
     this.buildMode = false;
     this.selectedPiece = PIECE_TYPES[0];
     this.selectedMaterial = MATERIAL_ORDER[0];
     this.rotation = DIRECTIONS[0];
     this.buildTarget = null;
-    this.gridDirty = true;
+    this.aimRay = null;
 
-    this._startPlayer();
-    this._wireEvents();
+    this._spawn();
   }
 
-  _startPlayer() {
-    // Drop the player onto Ember Peak's approach so there is terrain to stand on.
-    const x = 0, z = 220;
-    this.player.teleport(x, this.terrain.heightAt(x, z) + 1, z);
-    // Starting kit so the game is playable before loot exists in the world.
-    this.player.materials = { wood: 300, stone: 300, metal: 300 };
-    this.inventory.slots[1] = { kind: 'weapon', rarity: 'rare', weapon: new Weapon('assaultRifle', 'rare') };
-    this.inventory.slots[2] = { kind: 'weapon', rarity: 'uncommon', weapon: new Weapon('pumpShotgun', 'uncommon') };
-    this.inventory.addAmmo('medium', 180);
-    this.inventory.addAmmo('shells', 40);
+  _spawn() {
+    const s = this.terrain.spawnPoint();
+    this.player.teleport(s.x, s.y + 0.1, s.z);
+    this.player.materials = { wood: MATERIAL_CAP, brick: MATERIAL_CAP, metal: MATERIAL_CAP };
+    this.inventory.slots[0] = { kind: 'weapon', rarity: 'rare', weapon: new Weapon('assaultRifle', 'rare') };
+    this.inventory.slots[1] = { kind: 'weapon', rarity: 'uncommon', weapon: new Weapon('pumpShotgun', 'uncommon') };
+    this.inventory.addAmmo('medium', 210);
+    this.inventory.addAmmo('shells', 60);
+    this.camera.snapTo(this.player);
   }
 
-  _wireEvents() {
-    this.bus.on(Events.PIECE_PLACED, () => { this.gridDirty = true; });
-    this.bus.on(Events.PIECE_DESTROYED, () => { this.gridDirty = true; });
-    this.bus.on(Events.PIECE_EDITED, () => { this.gridDirty = true; });
-  }
-
-  /** One simulation tick. Always called with SIM.fixedDt. */
+  /** One simulation tick, always SIM.fixedDt. */
   update(dt = SIM.fixedDt) {
     this.time += dt;
 
-    this._handleInput(dt);
+    const intent = this._readInput(dt);
 
-    this.player.update(dt, this._moveAxis, {
-      sprintHeld: this._sprintHeld,
-      canSprint: !this._firing && !this._ads,
+    this.player.update(dt, intent.moveAxis, {
+      sprintHeld: intent.sprint,
+      buildMode: this.buildMode,
+      editMode: this.editor.isEditing,
       health: this.health
     });
 
+    // Camera updates before targeting so the aim ray reflects this tick's view (§8.1).
+    const weapon = this.inventory.activeWeapon;
+    this.camera.update(dt, this.player, {
+      adsProgress: weapon?.adsProgress ?? 0,
+      adsFov: weapon?.def.adsFov ?? null
+    });
+    this.aimRay = aimRayFrom(this.camera);
+
     this.grid.update(dt);
-    const destroyed = updateSupport(this.grid, dt, (cx, cz) => {
-      const c = cellCentre(cx, 0, cz);
-      return this.terrain.heightAt(c.x, c.z);
-    }, (piece) => this.bus.emit(Events.PIECE_DESTROYED, { piece, cause: 'unsupported' }));
-    if (destroyed.length > 0) this.gridDirty = true;
-
-    this.editor.update(dt, { distanceToTarget: this._editDistance ?? 0 });
-    this.inventory.update(dt);
-    this.health.update(dt);
-    this.storm.update(dt);
-
-    const stormDamage = this.storm.damageFor(
-      this.player.id, this.player.position.x, this.player.position.z, dt
-    );
-    if (stormDamage > 0) this.health.takeStormDamage(stormDamage);
-
-    // MAP_SPEC §3.1 — out of bounds takes damage and pushes back toward shore.
-    if (this.terrain.isOutOfBounds(this.player.position.x, this.player.position.z)) {
-      this.health.takeStormDamage(WORLD.oceanDps * dt);
-    }
-
     this._updateBuildTarget();
-    this.input?.endTick();
+    this.placementQueue.update(dt, (i) => this._executePlacement(i));
+    this._updateEditing(dt, intent);
+
+    this.inventory.update(dt, { ads: intent.ads });
+    this.health.update(dt);
+
+    this.input.endTick();
   }
 
-  _handleInput(dt) {
+  _readInput(dt) {
     const input = this.input;
-    if (!input) {
-      this._moveAxis = { x: 0, z: 0 };
-      return;
-    }
+    void dt;
 
-    // Look — drain the accumulated raw delta once per tick (§3.3, §11.3).
     const look = input.consumeLook();
-    const sensitivity = PlayerCamera.sensitivityFor(this.inventory.activeWeapon?.adsProgress ?? 0);
-    this.player.look(look.x, look.y, sensitivity);
+    const sensitivity = Input.sensitivityFor({
+      adsProgress: this.inventory.activeWeapon?.adsProgress ?? 0,
+      userSensitivity: this.settings?.mouseSensitivity ?? 1
+    });
+    this.player.look(look.x, look.y, sensitivity, this.settings?.invertY ?? false);
 
-    this._moveAxis = input.moveAxis();
-    this._sprintHeld = input.isDown('sprint');
-    this._firing = input.isDown('fire');
-    this._ads = input.isDown('ads');
+    const intent = {
+      moveAxis: input.moveAxis(),
+      sprint: input.isDown('sprint'),
+      ads: input.isDown('aim'),
+      fire: input.isDown('fire'),
+      firePresses: input.pressCount('fire')
+    };
+
     this.player.setCrouched(input.isDown('crouch'));
-
     if (input.wasPressed('jump')) this.player.requestJump();
 
-    // Build mode selection (§6.6) — instant, no animation lock.
-    const pieceKeys = ['buildWall', 'buildFloor', 'buildRamp', 'buildCone'];
-    pieceKeys.forEach((action, i) => {
+    // Build piece selection — instant, no animation lock (§9).
+    const pieceBinds = ['wall', 'floor', 'ramp', 'cone'];
+    pieceBinds.forEach((action, i) => {
       if (input.wasPressed(action)) {
         this.selectedPiece = PIECE_TYPES[i];
         this._setBuildMode(true);
       }
     });
-    if (input.wasPressed('toggleBuild')) this._setBuildMode(!this.buildMode);
 
-    // Material cycling (§6.6).
-    const wheel = input.consumeWheel();
-    if (input.wasPressed('cycleMaterial') || (this.buildMode && wheel !== 0)) {
-      const i = MATERIAL_ORDER.indexOf(this.selectedMaterial);
-      const step = wheel !== 0 ? wheel : 1;
-      this.selectedMaterial = MATERIAL_ORDER[
-        (i + step + MATERIAL_ORDER.length * 2) % MATERIAL_ORDER.length
-      ];
-    }
-
-    // Rotation, only meaningful in build mode (§6.6).
-    if (this.buildMode && input.wasPressed('rotate')) {
-      this.rotation = DIRECTIONS[(DIRECTIONS.indexOf(this.rotation) + 1) % DIRECTIONS.length];
-    }
-
-    // Weapon slots exit build mode (§6.6).
-    for (let i = 0; i < 6; i++) {
-      if (input.wasPressed(`slot${i}`)) {
+    // Weapon slots and pickaxe leave build mode.
+    for (let i = 0; i < this.inventory.size; i++) {
+      if (input.wasPressed(`weaponSlot${i + 1}`)) {
         this.inventory.select(i);
         this._setBuildMode(false);
       }
     }
+    if (input.wasPressed('pickaxe')) {
+      this.inventory.equipPickaxe();
+      this._setBuildMode(false);
+    }
 
-    this._handleEditInput(input);
-    this._handleBuildInput(input);
-    this._handleFireInput(input, dt);
+    if (this.buildMode && input.wasPressed('reload')) {
+      this.rotation = DIRECTIONS[(DIRECTIONS.indexOf(this.rotation) + 1) % DIRECTIONS.length];
+    }
+
+    // §9.3 — every fire press in build mode becomes a QUEUED intent, never a dropped one.
+    if (this.buildMode) {
+      const presses = Math.max(intent.firePresses, intent.fire ? 1 : 0);
+      for (let i = 0; i < presses; i++) {
+        this.placementQueue.enqueue({
+          type: this.selectedPiece,
+          material: this.selectedMaterial,
+          rotation: this.rotation
+        });
+      }
+    }
+
+    return intent;
   }
 
   _setBuildMode(on) {
     if (this.buildMode === on) return;
     this.buildMode = on;
-    if (on) this.editor.cancel(); // §3.4 — build and edit are mutually exclusive
+    if (on) this.editor.cancel();       // build and edit are mutually exclusive
+    else this.placementQueue.clear();
     this.bus.emit(Events.BUILD_MODE_CHANGED, { buildMode: on, piece: this.selectedPiece });
   }
 
-  _handleEditInput(input) {
-    const eye = this.player.eyePosition;
-    const dir = this._lookVector();
+  _updateBuildTarget() {
+    if (!this.buildMode || !this.aimRay) {
+      this.buildTarget = null;
+      return;
+    }
+    this.buildTarget = resolveBuildTarget({
+      origin: this.aimRay.origin,
+      direction: this.aimRay.direction,
+      pieceType: this.selectedPiece,
+      rotation: this.rotation,
+      grid: this.grid
+    });
+  }
+
+  /** @returns {boolean} whether the placement succeeded */
+  _executePlacement(intent) {
+    if (!this.buildTarget) return false;
+
+    const result = placePiece({
+      grid: this.grid,
+      type: intent.type,
+      material: intent.material,
+      cell: this.buildTarget.cell,
+      direction: this.buildTarget.direction,
+      builder: this.player,
+      players: [this.player],
+      now: this.time
+    });
+
+    if (!result.ok) return false;
+
+    this.player.notifyBuildPlaced();     // §5.5 — suppresses accidental mantling
+    this.bus.emit(Events.PIECE_PLACED, { piece: result.piece });
+    this._updateBuildTarget();
+    return true;
+  }
+
+  _updateEditing(dt, intent) {
+    const input = this.input;
+
+    // §10.9 — instant reset on the reset bind, without entering the edit flow.
+    if (input.wasPressed('resetEdit')) {
+      const hit = this.collision.raycastPieces(this.aimRay, EDIT.range);
+      if (hit) this.editor.resetPiece(hit.piece, this.player.id, hit.distance);
+    }
 
     if (input.wasPressed('edit')) {
       if (this.editor.isEditing) {
         this.editor.confirm();
       } else {
-        const hit = resolveEditTarget({ origin: eye, direction: dir, grid: this.grid, maxDistance: EDIT.range });
+        const hit = this.collision.raycastPieces(this.aimRay, EDIT.range);
         if (hit) {
           this._setBuildMode(false);
           this.editor.begin(hit.piece, this.player.id, hit.distance);
-          this._editDistance = hit.distance;
         }
       }
     }
 
     if (this.editor.isEditing) {
-      if (input.wasPressed('rotate')) this.editor.reset();
-      // Keep the range check fed so walking away cancels the edit (§7.2).
       const piece = this.editor.target;
-      if (piece) {
-        const c = piece.worldCentre;
-        this._editDistance = Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z);
+      const c = piece ? piece.worldCentre : null;
+      const distance = c
+        ? Math.hypot(c.x - this.aimRay.origin.x, c.y - this.aimRay.origin.y, c.z - this.aimRay.origin.z)
+        : Infinity;
+      this.editor.update(dt, { distanceToTarget: distance });
+
+      if (this.editor.confirmOnRelease && input.wasReleased('confirmEdit')) {
+        this.editor.confirm();
       }
-      if (input.wasReleased('fire')) this.editor.confirm();
     }
+    void intent;
   }
 
-  _handleBuildInput(input) {
-    if (!this.buildMode || !this.buildTarget) return;
-
-    // Turbo build: holding fire places into every valid slot crossed (§6.3 rule 7).
-    const wantsPlace = input.wasPressed('fire') || input.isDown('fire');
-    if (!wantsPlace) return;
-
-    const interval = input.isDown('fire') && !input.wasPressed('fire')
-      ? BUILD.turboPlacementInterval
-      : BUILD.minPlacementInterval;
-
-    if (this.player.lastPlacementTime != null &&
-        this.time - this.player.lastPlacementTime < interval) {
-      return;
-    }
-
-    const result = placePiece({
+  /** Can a piece be placed at the current target? Drives the preview colour (§9.2). */
+  get buildTargetValid() {
+    if (!this.buildTarget) return false;
+    return validatePlacement({
       grid: this.grid,
       type: this.selectedPiece,
       material: this.selectedMaterial,
@@ -228,72 +260,12 @@ export class Game {
       direction: this.buildTarget.direction,
       builder: this.player,
       players: [this.player],
-      now: this.time,
-      playableExtent: WORLD.playableExtent
-    });
-
-    if (result.ok) {
-      this.bus.emit(Events.PIECE_PLACED, { piece: result.piece });
-    } else if (result.reason !== PlacementResult.RATE_LIMITED) {
-      this._lastPlacementReject = result.reason;
-    }
+      now: this.time
+    }).ok;
   }
 
-  _handleFireInput(input, dt) {
-    if (this.buildMode || this.editor.isEditing) return;
-    const weapon = this.inventory.activeWeapon;
-    if (!weapon) return;
-
-    if (input.wasPressed('reload')) {
-      weapon.beginReload(this.inventory.ammo[weapon.ammoType] ?? 0);
-    }
-    if (input.isDown('fire') && weapon.canFire) {
-      weapon.fire(this.bus);
-      this._resolveShot(weapon);
-    }
-    void dt;
-  }
-
-  /** Trace a shot against structures. Player hits arrive with networking (§12). */
-  _resolveShot(weapon) {
-    const eye = this.player.eyePosition;
-    const dir = this._lookVector();
-    const hit = resolveEditTarget({ origin: eye, direction: dir, grid: this.grid, maxDistance: 200, step: 0.4 });
-    if (!hit) return;
-
-    const destroyed = hit.piece.applyDamage(weapon.structureDamage);
-    this.bus.emit(Events.PIECE_DAMAGED, { piece: hit.piece, amount: weapon.structureDamage });
-    if (destroyed) {
-      this.grid.remove(hit.piece);
-      this.bus.emit(Events.PIECE_DESTROYED, { piece: hit.piece, cause: 'weapon' });
-    }
-  }
-
-  _lookVector() {
-    const cp = Math.cos(this.player.pitch);
-    return {
-      x: -Math.sin(this.player.yaw) * cp,
-      y: Math.sin(this.player.pitch),
-      z: -Math.cos(this.player.yaw) * cp
-    };
-  }
-
-  _updateBuildTarget() {
-    if (!this.buildMode) {
-      this.buildTarget = null;
-      return;
-    }
-    this.buildTarget = resolveBuildTarget({
-      origin: this.player.eyePosition,
-      direction: this._lookVector(),
-      pieceType: this.selectedPiece,
-      rotation: this.rotation,
-      grid: this.grid
-    });
-  }
-
-  /** State snapshot for the HUD. Read-only. */
-  hudState(stats) {
+  /** Read-only snapshot for the HUD (§18.1). */
+  hudState(stats = null) {
     const weapon = this.inventory.activeWeapon;
     return {
       health: this.health.health,
@@ -303,8 +275,12 @@ export class Game {
       selectedPiece: this.selectedPiece,
       selectedMaterial: this.selectedMaterial,
       selectedSlot: this.inventory.selected,
+      pickaxeEquipped: this.inventory.pickaxeEquipped,
       inventory: this.inventory,
       pieceCount: this.grid.pieceCount,
+      editing: this.editor.isEditing,
+      editTiles: this.editor.gridTileCount,
+      editSelection: [...this.editor.selection],
       spreadDegrees: weapon
         ? weapon.spread({
             horizontalSpeed: this.player.horizontalSpeed,
@@ -312,12 +288,9 @@ export class Game {
             crouched: this.player.crouched
           })
         : 0,
-      storm: {
-        phase: this.storm.currentPhase?.phase ?? 0,
-        timer: this.storm.timer,
-        radius: this.storm.radius
-      },
       stats
     };
   }
 }
+
+export { worldToCell, cellCentre, BuildPiece };

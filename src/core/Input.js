@@ -1,102 +1,142 @@
 /**
- * Input.js — rebindable input over Pointer Lock. MASTER_SPEC §11.3.
+ * Input.js — MASTER_SPEC §4.
  *
- * Mouse look is read from raw movementX/Y deltas and accumulated; the simulation drains
- * the accumulator each tick so look is frame-rate independent and never smoothed.
+ * Contract: input is sampled every frame; build and edit inputs are NEVER dropped.
+ *
+ * Events arrive on browser event handlers (many per simulation tick at high frame rates)
+ * and are latched into counters. The simulation drains them once per tick. Because
+ * presses are COUNTED rather than flagged, two presses landing inside one tick both
+ * survive — which is what makes rapid build and edit sequences reliable (§9.3, §10.10).
  */
-import { DEFAULT_BINDINGS } from './Config.js';
+import { DEFAULT_BINDINGS, BIND_CONFLICT_EXEMPT, CAMERA } from './Config.js';
+
+/** Synthetic codes for wheel directions, independently bindable per §4. */
+export const WHEEL_UP = 'WheelUp';
+export const WHEEL_DOWN = 'WheelDown';
 
 export class Input {
-  constructor(target = document, bindings = DEFAULT_BINDINGS) {
-    this.target = target;
+  constructor(bindings = DEFAULT_BINDINGS) {
     this.bindings = { ...bindings };
 
-    this.down = new Set();        // physical codes currently held
-    this.pressedThisTick = new Set();
-    this.releasedThisTick = new Set();
+    /** Physical codes currently held. */
+    this.held = new Set();
+    /** code -> number of presses since the last drain. Never collapses to a flag. */
+    this.pressCounts = new Map();
+    /** code -> number of releases since the last drain. */
+    this.releaseCounts = new Map();
 
     this.lookDeltaX = 0;
     this.lookDeltaY = 0;
-    this.wheelDelta = 0;
     this.pointerLocked = false;
 
-    this._bound = [];
+    this._detach = [];
+    this.canvasEl = null;
   }
 
+  /* ── lifecycle ─────────────────────────────────────────────────────────── */
+
   attach(canvasEl) {
-    const add = (el, type, fn) => {
-      el.addEventListener(type, fn);
-      this._bound.push(() => el.removeEventListener(type, fn));
+    this.canvasEl = canvasEl;
+    const on = (el, type, fn, opts) => {
+      el.addEventListener(type, fn, opts);
+      this._detach.push(() => el.removeEventListener(type, fn, opts));
     };
 
-    add(window, 'keydown', (e) => {
-      if (e.repeat) return;
+    on(window, 'keydown', (e) => {
+      if (e.repeat) return;          // auto-repeat is not a new press
       this._press(e.code);
-      // Stop F1-F5 opening browser help etc. while we own the pointer.
-      if (this.pointerLocked && /^F\d$/.test(e.code)) e.preventDefault();
+      if (this.pointerLocked && /^F\d+$/.test(e.code)) e.preventDefault();
     });
-    add(window, 'keyup', (e) => this._release(e.code));
-    add(window, 'blur', () => this._releaseAll());
+    on(window, 'keyup', (e) => this._release(e.code));
+    on(window, 'blur', () => this._releaseAll());
 
-    add(canvasEl, 'mousedown', (e) => this._press(`Mouse${e.button}`));
-    add(window, 'mouseup', (e) => this._release(`Mouse${e.button}`));
-    add(canvasEl, 'contextmenu', (e) => e.preventDefault());
+    on(canvasEl, 'mousedown', (e) => this._press(`Mouse${e.button}`));
+    on(window, 'mouseup', (e) => this._release(`Mouse${e.button}`));
+    on(canvasEl, 'contextmenu', (e) => e.preventDefault());
 
-    add(window, 'mousemove', (e) => {
+    on(window, 'mousemove', (e) => {
       if (!this.pointerLocked) return;
       this.lookDeltaX += e.movementX || 0;
       this.lookDeltaY += e.movementY || 0;
     });
 
-    add(window, 'wheel', (e) => { this.wheelDelta += Math.sign(e.deltaY); }, { passive: true });
+    // §4 — wheel up and wheel down are separate, independently bindable codes. A wheel
+    // notch is a press and an immediate release; it is never "held".
+    on(window, 'wheel', (e) => {
+      if (e.deltaY === 0) return;
+      const code = e.deltaY < 0 ? WHEEL_UP : WHEEL_DOWN;
+      this._press(code);
+      this._release(code);
+      this.held.delete(code);
+    }, { passive: true });
 
-    add(document, 'pointerlockchange', () => {
+    on(document, 'pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === canvasEl;
       if (!this.pointerLocked) this._releaseAll();
     });
+  }
 
-    this.canvasEl = canvasEl;
+  detach() {
+    for (const off of this._detach) off();
+    this._detach.length = 0;
   }
 
   requestPointerLock() {
     this.canvasEl?.requestPointerLock?.();
   }
 
-  detach() {
-    for (const off of this._bound) off();
-    this._bound.length = 0;
-  }
+  /* ── raw event latching ────────────────────────────────────────────────── */
 
   _press(code) {
-    if (!this.down.has(code)) this.pressedThisTick.add(code);
-    this.down.add(code);
+    this.pressCounts.set(code, (this.pressCounts.get(code) ?? 0) + 1);
+    this.held.add(code);
   }
 
   _release(code) {
-    if (this.down.has(code)) this.releasedThisTick.add(code);
-    this.down.delete(code);
+    this.releaseCounts.set(code, (this.releaseCounts.get(code) ?? 0) + 1);
+    this.held.delete(code);
   }
 
   _releaseAll() {
-    for (const code of this.down) this.releasedThisTick.add(code);
-    this.down.clear();
+    for (const code of [...this.held]) this._release(code);
   }
 
-  /** Is the action's bound key held? */
+  /** Test seam: synthesise input without a DOM. */
+  simulatePress(code) { this._press(code); }
+  simulateRelease(code) { this._release(code); }
+  simulateWheel(direction) {
+    const code = direction < 0 ? WHEEL_UP : WHEEL_DOWN;
+    this._press(code);
+    this._release(code);
+    this.held.delete(code);
+  }
+  simulateLook(dx, dy) { this.lookDeltaX += dx; this.lookDeltaY += dy; }
+
+  /* ── queries, by action ────────────────────────────────────────────────── */
+
   isDown(action) {
-    return this.down.has(this.bindings[action]);
+    return this.held.has(this.bindings[action]);
   }
 
-  /** Was the action's bound key pressed since the last endTick()? */
+  /** Was the action pressed at least once since the last drain? */
   wasPressed(action) {
-    return this.pressedThisTick.has(this.bindings[action]);
+    return (this.pressCounts.get(this.bindings[action]) ?? 0) > 0;
+  }
+
+  /**
+   * How many times was the action pressed since the last drain? Build and edit code uses
+   * this rather than wasPressed so a burst inside one tick places a piece per press
+   * instead of collapsing to one (§9.3).
+   */
+  pressCount(action) {
+    return this.pressCounts.get(this.bindings[action]) ?? 0;
   }
 
   wasReleased(action) {
-    return this.releasedThisTick.has(this.bindings[action]);
+    return (this.releaseCounts.get(this.bindings[action]) ?? 0) > 0;
   }
 
-  /** Drain the accumulated look delta. Call exactly once per simulation tick. */
+  /** Drain the accumulated look delta. Exactly once per simulation tick. */
   consumeLook() {
     const x = this.lookDeltaX;
     const y = this.lookDeltaY;
@@ -105,27 +145,75 @@ export class Input {
     return { x, y };
   }
 
-  consumeWheel() {
-    const w = this.wheelDelta;
-    this.wheelDelta = 0;
-    return w;
-  }
-
-  /** Normalised movement intent in local space: x = right, z = forward. */
+  /** Normalised movement intent, local space: x right, z forward. */
   moveAxis() {
     const x = (this.isDown('moveRight') ? 1 : 0) - (this.isDown('moveLeft') ? 1 : 0);
-    const z = (this.isDown('moveForward') ? 1 : 0) - (this.isDown('moveBack') ? 1 : 0);
+    const z = (this.isDown('moveForward') ? 1 : 0) - (this.isDown('moveBackward') ? 1 : 0);
     const len = Math.hypot(x, z);
     return len > 1 ? { x: x / len, z: z / len } : { x, z };
   }
 
-  /** Clear per-tick edge state. Call at the end of every simulation tick. */
+  /** Clear per-tick edge state. Call at the END of every simulation tick. */
   endTick() {
-    this.pressedThisTick.clear();
-    this.releasedThisTick.clear();
+    this.pressCounts.clear();
+    this.releaseCounts.clear();
   }
 
-  rebind(action, code) {
+  /* ── rebinding — §20 ───────────────────────────────────────────────────── */
+
+  /**
+   * Find actions that would collide with binding `action` to `code`.
+   * @returns {string[]} conflicting action names, empty if the bind is clean
+   */
+  findConflicts(action, code) {
+    const exempt = new Set(
+      BIND_CONFLICT_EXEMPT
+        .filter((pair) => pair.includes(action))
+        .flat()
+    );
+    return Object.entries(this.bindings)
+      .filter(([other, bound]) => other !== action && bound === code && !exempt.has(other))
+      .map(([other]) => other);
+  }
+
+  /**
+   * Rebind an action. Conflicts are reported, never silently accepted (§20).
+   * @returns {{ok:boolean, conflicts:string[]}}
+   */
+  rebind(action, code, { force = false } = {}) {
+    if (!(action in this.bindings)) return { ok: false, conflicts: [] };
+    const conflicts = this.findConflicts(action, code);
+    if (conflicts.length > 0 && !force) return { ok: false, conflicts };
+    if (force) for (const other of conflicts) this.bindings[other] = null;
     this.bindings[action] = code;
+    return { ok: true, conflicts };
+  }
+
+  /** Every conflicting pair in the current binding set. */
+  allConflicts() {
+    const out = [];
+    const actions = Object.keys(this.bindings);
+    for (let i = 0; i < actions.length; i++) {
+      for (let j = i + 1; j < actions.length; j++) {
+        const a = actions[i], b = actions[j];
+        if (this.bindings[a] == null || this.bindings[a] !== this.bindings[b]) continue;
+        const exempt = BIND_CONFLICT_EXEMPT.some(
+          (pair) => pair.includes(a) && pair.includes(b)
+        );
+        if (!exempt) out.push([a, b]);
+      }
+    }
+    return out;
+  }
+
+  resetBindings() {
+    this.bindings = { ...DEFAULT_BINDINGS };
+  }
+
+  /** Effective look sensitivity for the current aim state (§7, §19). */
+  static sensitivityFor({ adsProgress = 0, scoped = false, userSensitivity = 1 } = {}) {
+    const aimScale = scoped ? CAMERA.scopeSensitivityScale : CAMERA.adsSensitivityScale;
+    const scale = 1 + (aimScale - 1) * adsProgress;
+    return CAMERA.lookSensitivity * userSensitivity * scale;
   }
 }

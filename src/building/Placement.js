@@ -3,7 +3,7 @@
  *
  * Terrain never blocks placement (rule 5). Players do (rule 4).
  */
-import { BUILD, MATERIALS } from '../core/Config.js';
+import { BUILD, MATERIALS, TILE, WALL_H } from '../core/Config.js';
 import { BuildPiece } from './BuildPiece.js';
 import { cellCentre } from './BuildGrid.js';
 
@@ -15,7 +15,7 @@ export const PlacementResult = Object.freeze({
   OUTSIDE_BOUNDARY: 'outsideBoundary',
   INSUFFICIENT_MATERIAL: 'insufficientMaterial',
   BLOCKED_BY_PLAYER: 'blockedByPlayer',
-  RATE_LIMITED: 'rateLimited'
+  QUEUE_FULL: 'queueFull'
 });
 
 const slotFor = (type, direction) => (type === 'wall' ? `wall:${direction}` : type);
@@ -25,8 +25,8 @@ const slotFor = (type, direction) => (type === 'wall' ? `wall:${direction}` : ty
  * See references/building/01-piece-geometry.md.
  */
 export function pieceLocalBounds(type, direction) {
-  const T = BUILD.tileSize;
-  const H = BUILD.wallHeight;
+  const T = TILE;
+  const H = WALL_H;
   const K = BUILD.thickness;
 
   switch (type) {
@@ -51,9 +51,9 @@ export function pieceLocalBounds(type, direction) {
 /** World-space AABB for a piece in a cell. */
 export function pieceWorldBounds(type, direction, cell) {
   const { min, max } = pieceLocalBounds(type, direction);
-  const ox = cell.cx * BUILD.tileSize;
-  const oy = cell.cy * BUILD.wallHeight;
-  const oz = cell.cz * BUILD.tileSize;
+  const ox = cell.cx * TILE;
+  const oy = cell.cy * WALL_H;
+  const oz = cell.cz * TILE;
   return {
     min: [min[0] + ox, min[1] + oy, min[2] + oz],
     max: [max[0] + ox, max[1] + oy, max[2] + oz]
@@ -90,18 +90,16 @@ export function overlapsPlayer(bounds, player) {
 export function validatePlacement(req) {
   const {
     grid, type, material, cell, direction = 'north',
-    builder, players = [], now = Infinity, playableExtent = null
+    builder, players = [], playableExtent = null
   } = req;
 
   if (!MATERIALS[material]) {
     return { ok: false, reason: PlacementResult.INSUFFICIENT_MATERIAL };
   }
 
-  // Rule 6 — minimum interval between placements.
-  if (builder.lastPlacementTime != null &&
-      now - builder.lastPlacementTime < BUILD.minPlacementInterval) {
-    return { ok: false, reason: PlacementResult.RATE_LIMITED };
-  }
+  // NOTE: there is deliberately no rate-limit rejection here. MASTER_SPEC §9.3 forbids
+  // silently dropping build inputs; pacing is handled by PlacementQueue, which BUFFERS an
+  // early intent instead of discarding it.
 
   // Rule 4 — build ceiling is an absolute altitude (MAP_SPEC §3.4).
   if (cell.cy * BUILD.wallHeight >= BUILD.ceilingY) {
@@ -157,10 +155,9 @@ export function placePiece(req) {
   const check = validatePlacement(req);
   if (!check.ok) return check;
 
-  const { grid, type, material, cell, direction = 'north', builder, now = 0 } = req;
+  const { grid, type, material, cell, direction = 'north', builder } = req;
 
   builder.materials[material] -= BUILD.cost;
-  builder.lastPlacementTime = now;
 
   const piece = new BuildPiece({ type, material, cell, direction, ownerId: builder.id ?? 0 });
   grid.add(piece);

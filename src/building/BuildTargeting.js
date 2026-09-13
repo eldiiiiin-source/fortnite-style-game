@@ -5,9 +5,8 @@
  * target slot is free is the placement candidate. Terrain never blocks (§6.3 rule 5), so
  * this is a pure grid walk, not a physics query.
  */
-import { BUILD } from '../core/Config.js';
+import { BUILD, DIRECTIONS } from '../core/Config.js';
 import { worldToCell } from './BuildGrid.js';
-import { DIRECTIONS } from '../core/Config.js';
 
 /** Which wall face a look direction is most aligned with. */
 export function facingDirection(dirX, dirZ) {
