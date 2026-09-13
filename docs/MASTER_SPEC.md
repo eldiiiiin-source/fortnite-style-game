@@ -63,15 +63,14 @@ responsiveness is never traded for visual detail.
 
 | Parameter | Value | Marker |
 | --- | --- | --- |
-| Simulation tick rate | **60 Hz fixed** (16.667 ms) | [PROV] |
+| Simulation tick rate | **60 Hz fixed** (16.667 ms) | **[OWNER]** approved 2026-09-13 |
 | Max simulation steps per frame | 5 | [PROV] |
 | Render | Interpolated between the two latest sim states | [PROV] |
 | Units | Metres, seconds, radians | [PROV] |
 
-> **Change from baseline:** the baseline simulated at 30 Hz. Input responsiveness is
-> priority 1 and the spec requires input sampled reliably every frame with no dropped
-> build or edit inputs; a 30 Hz tick adds up to 33 ms of input latency before a build even
-> starts. 60 Hz halves that and matches the 60 FPS target. Flagged in §46.
+> **Owner-approved 2026-09-13.** Input, movement, building, editing, collision and combat
+> are all designed around responsive 60 Hz gameplay. The baseline's 30 Hz added up to
+> 33 ms of latency before a build began; 60 Hz halves that and matches the 60 FPS target.
 
 Gameplay code never reads wall-clock frame time. Coordinate system is right-handed, **Y
 up**; yaw 0 faces `-Z`, pitch positive looking up.
@@ -167,7 +166,7 @@ This is a correctness requirement, not a feel goal. It is tested in §44.
 | Gravity | 22 m/s² |
 | Jump velocity | 7.4 m/s (apex 1.24 m, 0.67 s airtime) |
 | Terminal velocity | 60 m/s |
-| Step height | 0.45 m |
+| Step height | `WALL_H × 0.1171875` = 0.45 m (derived, §9.1.1) |
 | Max walkable slope | 50° |
 | Coyote time | 100 ms |
 | Jump buffer | 120 ms |
@@ -182,9 +181,9 @@ height**, and remains responsive during build and edit workflows.
 
 | Parameter | Value | Marker |
 | --- | --- | --- |
-| Standing capsule height | 1.85 m | [PROV] |
-| Crouched capsule height | 1.25 m | [PROV] |
-| Capsule radius | 0.4 m | [PROV] |
+| Standing capsule height | `WALL_H × 0.5` = 1.92 m | derived, §9.1.1 |
+| Crouched capsule height | `WALL_H × 0.3125` = 1.20 m | derived, §9.1.1 |
+| Capsule radius | `TILE × 0.078125` = 0.40 m | derived, §9.1.1 |
 | Crouch transition | 120 ms, camera and capsule together | [PROV] |
 
 ### 5.5 Mantling [OWNER]
@@ -306,10 +305,64 @@ rapidly, and **building through fast camera turns**.
 
 | Parameter | Value | Marker |
 | --- | --- | --- |
-| Tile footprint | 5.12 m × 5.12 m | [PROV] |
-| Wall height | 3.84 m | [PROV] |
-| Piece thickness | 0.20 m | [PROV] |
-| Ramp slope | 36.87° (3.84 rise / 5.12 run) | [PROV, derived] |
+| **Tile footprint (`TILE`)** | **5.12 m × 5.12 m** | **[OWNER]** approved 2026-09-13 |
+| **Wall height (`WALL_H`)** | **3.84 m** | **[OWNER]** approved 2026-09-13 |
+| Piece thickness | `TILE × 0.0390625` = 0.20 m | [PROV] |
+| Ramp slope | 36.87° (`atan(WALL_H / TILE)`) | derived |
+
+### 9.1.1 The build module is the unit of scale [OWNER]
+
+> "These values MUST remain centralized and configurable. Do not scatter these dimensions
+> through geometry, collision or edit code. The player capsule, doors, wall openings, ramps
+> and edit geometry must be dimensioned relative to the build module so we can retune
+> player/build scale later without rewriting the architecture."
+
+`TILE` and `WALL_H` are declared **once** in `src/core/Config.js`. Every other spatial
+dimension in the game is **derived from them by ratio**, never written as a literal.
+
+**No file outside `Config.js` may contain a spatial literal.** Geometry, collision, edit
+tiles, the player capsule and the camera all read derived values. Retuning the module is a
+two-number change that rescales the game coherently — that is the whole point of this rule,
+and a test asserts the derivation rather than the absolute results.
+
+#### Derived edit-tile dimensions
+
+| Piece | Grid | Tile width | Tile height |
+| --- | --- | --- | --- |
+| Wall | 3 × 3 | `TILE / 3` = 1.7067 m | `WALL_H / 3` = 1.2800 m |
+| Floor | 2 × 2 | `TILE / 2` = 2.5600 m | `TILE / 2` = 2.5600 m (depth) |
+| Cone | 2 × 2 | `TILE / 2` = 2.5600 m | `TILE / 2` = 2.5600 m (depth) |
+| Ramp | 3 rows × 2 cols | `TILE / 2` = 2.5600 m | `WALL_H / 3` = 1.2800 m rise/row |
+
+#### Derived player capsule
+
+| Dimension | Ratio | Value |
+| --- | --- | --- |
+| Capsule radius | `TILE × 0.078125` | 0.400 m (0.800 m diameter) |
+| Standing height | `WALL_H × 0.5` | 1.920 m |
+| Crouched height | `WALL_H × 0.3125` | 1.200 m |
+| Step height | `WALL_H × 0.1171875` | 0.450 m |
+
+Crouched height is deliberately just under one wall-edit row (1.28 m), so a crouched player
+clears a single-row opening and a standing player does not. That relationship is a
+consequence of the ratios and survives any retune of the module.
+
+#### Clearance verification [OWNER requirement]
+
+Computed from the ratios above and asserted by test:
+
+| Opening | Size | Side clearance | Head clearance | Passable |
+| --- | --- | --- | --- | --- |
+| **Door** (tiles 4,7) | 1.707 × 2.560 m | +0.453 m | +0.640 m | **Standing** ✅ |
+| **Three-tile opening** (1,4,7) | 1.707 × 3.840 m | +0.453 m | +1.920 m | **Standing** ✅ |
+| Bottom row (6,7,8) | 5.120 × 1.280 m | +2.160 m | −0.640 m | Crouched only |
+| Window (tile 4) | 1.707 × 1.280 m | +0.453 m | −0.640 m | Not passable (by design) |
+
+> **Correction to the baseline.** The baseline defined the door as tiles `6,7` — a
+> *horizontal* pair only 1.28 m tall, which a 1.92 m standing player cannot walk through.
+> The door is a **vertical** opening in the middle column, tiles `4,7`. The "three-tile
+> opening" the owner requires to fit the player is likewise the **full middle column**
+> `1,4,7`, not the bottom row.
 
 Cells are integer `(cx, cy, cz)` addressed from world origin, axis-aligned, never rotated.
 Slots per cell: `floor`, `ramp`, `cone`, `wall:north|east|south|west`.
@@ -441,6 +494,16 @@ Required valid patterns: single window, centred window, side window, door, door 
 corner opening, half wall, top row removed, three-tile opening, arch-like opening where
 appropriate, and common competitive wall edits. **Invalid patterns must be rejected.**
 
+Openings intended to be walked through are **vertical**, because one row is only
+`WALL_H / 3` = 1.28 m tall while a standing player is 1.92 m (§9.1.1):
+
+| Pattern | Tiles | Walkable |
+| --- | --- | --- |
+| Door | `4, 7` | Standing |
+| Three-tile opening / arch | `1, 4, 7` | Standing |
+| Door + window | `1, 4, 7` with `3` or `5` | Standing |
+| Bottom row | `6, 7, 8` | Crouched only |
+
 Implemented as an allow list so anything unlisted is rejected by construction.
 
 ### 10.4 Wall collision [OWNER]
@@ -535,9 +598,18 @@ current edit pattern:
   tiles contribute no box.
 - **Floor** — a 2 × 2 lattice of `(tile/2) × thickness × (tile/2)` boxes.
 - **Cone** — 2 × 2 quadrants of the pyramid.
-- **Ramp** — 6 stepped boxes on the 3 × 2 grid, each at its row's height.
+- **Ramp** — **an inclined plane per occupied grid column**, not stepped boxes.
 
-Collision queries test these boxes. The renderer draws the same set. One source, no drift.
+> **Correction.** An earlier draft proposed one collision box per ramp edit row. Each row
+> rises `WALL_H / 3` = 1.28 m, far above the 0.45 m step height, so a stepped collider
+> would wall the player off from their own ramp. Ramp collision is a **sloped surface**:
+> each of the 2 columns contributes an inclined plane spanning the rows that remain after
+> the edit, at the slope `atan(WALL_H / TILE)` = 36.87°. A flipped or rotated stair
+> produces a plane with the corresponding orientation, and the previous plane is destroyed
+> (§10.8).
+
+Collision queries test these shapes. The renderer draws the same set, built by the same
+function from the same edit pattern. One source, no drift.
 
 ## 12. Weapon system [OWNER]
 
@@ -862,10 +934,17 @@ Each is a named test in the suite.
 The owner's specification is behavioural; these numbers were not supplied and are carried
 or derived. Listed highest-impact first.
 
+**Signed off by the owner on 2026-09-13:**
+
+| Value | Approved as |
+| --- | --- |
+| Simulation tick rate | 60 Hz |
+| Build tile / wall height | 5.12 m / 3.84 m, centralised and derived from (§9.1.1) |
+
+**Still outstanding:**
+
 | # | Value | Current | Why it matters |
 | --- | --- | --- | --- |
-| 1 | Build tile size / wall height | 5.12 m / 3.84 m | Propagates into grid, targeting, geometry, edit tile sizes and collision boxes |
-| 2 | Simulation tick rate | 60 Hz (raised from 30) | Input latency; priority 1 |
 | 3 | Camera distance / shoulder offset | 2.6 m / 0.45 m | "Close", "not too far", edit precision |
 | 4 | Movement speeds and acceleration | 4.6 / 7.6 / 2.4 m/s, 85 m/s² | Whole feel of the game |
 | 5 | Weapon damage / fire rate table | §12.1 | All combat balance |
