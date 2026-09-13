@@ -14,7 +14,7 @@ Reference material behind `docs/MAP_SPEC.md`.
 
 | File | What it is | Spec section |
 | --- | --- | --- |
-| _(none yet)_ | | |
+| `02-chapter2-season1-references.md` | Notes from the owner's five Chapter 2 S1 reference images, and the map mismatches they already establish | `MAP_SPEC` (pending rewrite) |
 
 ## Open questions
 
