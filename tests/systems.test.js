@@ -4,15 +4,14 @@ import { Settings, DEFAULT_SETTINGS } from '../src/core/Settings.js';
 import { AudioSystem, CUES, FOOTSTEP_SURFACES } from '../src/audio/AudioSystem.js';
 import { WorldLoot, LootPickup, Container, resetLootIds } from '../src/loot/WorldLoot.js';
 import { Pickaxe } from '../src/combat/Pickaxe.js';
-import { Bot, BotState, BOT_CONFIG, resetBotIds } from '../src/world/Bot.js';
+import { resetBotIds } from '../src/world/Bot.js';
 import { Inventory, Weapon } from '../src/combat/Weapon.js';
 import { BuildGrid } from '../src/building/BuildGrid.js';
 import { BuildPiece, resetPieceIds } from '../src/building/BuildPiece.js';
 import { CollisionWorld } from '../src/building/CollisionWorld.js';
-import { TestEnvironment } from '../src/world/TestEnvironment.js';
 import { EventBus, Events } from '../src/core/EventBus.js';
 import { RandomStream } from '../src/core/Random.js';
-import { PICKAXE, SIM, TILE, INVENTORY, MOVEMENT } from '../src/core/Config.js';
+import { PICKAXE, SIM, TILE, INVENTORY } from '../src/core/Config.js';
 
 const dt = SIM.fixedDt;
 beforeEach(() => { resetLootIds(); resetBotIds(); resetPieceIds(); });
@@ -415,99 +414,10 @@ describe('§14 pickaxe', () => {
   });
 });
 
-/* ── §17 bots ────────────────────────────────────────────────────────────── */
-
-describe('§17 bots', () => {
-  let terrain, bus, bot;
-  beforeEach(() => {
-    terrain = new TestEnvironment();
-    bus = new EventBus();
-    bot = new Bot({ terrain, bus, spawn: { x: 0, y: 0, z: 0 }, rng: new RandomStream(3) });
-  });
-
-  it('uses the real player controller, so it obeys the same movement rules', () => {
-    expect(bot.controller.radius).toBe(MOVEMENT.capsuleRadius);
-    expect(bot.controller.height).toBe(MOVEMENT.standHeight);
-  });
-
-  it('patrols when nothing is in sight', () => {
-    for (let i = 0; i < 120; i++) bot.update(dt, {});
-    expect(bot.state).toBe(BotState.PATROL);
-  });
-
-  it('moves while patrolling', () => {
-    const start = { ...bot.position };
-    for (let i = 0; i < 300; i++) bot.update(dt, {});
-    const moved = Math.hypot(bot.position.x - start.x, bot.position.z - start.z);
-    expect(moved).toBeGreaterThan(0.5);
-  });
-
-  it('chases a player it can see', () => {
-    const player = { id: 1, position: { x: BOT_CONFIG.sightRange * 0.8, y: 0, z: 0 } };
-    bot.update(dt, { player });
-    expect(bot.state).toBe(BotState.CHASE);
-  });
-
-  it('attacks at close range and fires on an interval', () => {
-    const player = { id: 1, position: { x: BOT_CONFIG.attackRange * 0.5, y: 0, z: 0 } };
-    const shots = [];
-    bus.on('bot:fired', (e) => shots.push(e));
-
-    for (let i = 0; i < 120; i++) bot.update(dt, { player });
-    expect(bot.state).toBe(BotState.ATTACK);
-    expect(shots.length).toBeGreaterThan(0);
-    expect(shots.length).toBeLessThanOrEqual(Math.ceil(120 * dt / BOT_CONFIG.fireInterval) + 1);
-  });
-
-  it('gives up the chase when the player is out of sight range', () => {
-    const player = { id: 1, position: { x: 2, y: 0, z: 0 } };
-    bot.update(dt, { player });
-    expect(bot.state).toBe(BotState.ATTACK);
-    player.position.x = BOT_CONFIG.sightRange * 3;
-    bot.update(dt, { player });
-    expect(bot.state).toBe(BotState.PATROL);
-  });
-
-  it('takes damage and dies', () => {
-    bot.takeDamage(60);
-    expect(bot.alive).toBe(true);
-    bot.takeDamage(60);
-    expect(bot.alive).toBe(false);
-    expect(bot.state).toBe(BotState.DEAD);
-  });
-
-  it('emits an elimination when it dies', () => {
-    const seen = [];
-    bus.on(Events.PLAYER_DIED, (e) => seen.push(e.ownerId));
-    bot.takeDamage(999);
-    expect(seen).toContain(bot.id);
-  });
-
-  it('drops loot once and only once', () => {
-    const loot = new WorldLoot(bus, new RandomStream(1));
-    bot.takeDamage(999);
-    const first = bot.dropLoot(loot);
-    expect(first.length).toBeGreaterThan(0);
-    expect(bot.dropLoot(loot)).toEqual([]);
-  });
-
-  it('does not drop loot while alive', () => {
-    const loot = new WorldLoot(bus, new RandomStream(1));
-    expect(bot.dropLoot(loot)).toEqual([]);
-  });
-
-  it('stops updating once dead', () => {
-    bot.takeDamage(999);
-    const at = { ...bot.position };
-    for (let i = 0; i < 60; i++) bot.update(dt, {});
-    expect(bot.position).toEqual(at);
-  });
-
-  it('respawns cleanly', () => {
-    bot.takeDamage(999);
-    bot.respawn();
-    expect(bot.alive).toBe(true);
-    expect(bot.state).toBe(BotState.PATROL);
-    expect(bot.droppedLoot).toBe(false);
-  });
-});
+/* ── §17 bots ────────────────────────────────────────────────────────────
+ *
+ * Bot coverage lives in tests/battleroyale.test.js, against BATTLE_ROYALE_SPEC §9.
+ * The bots were rewritten from a sandbox target into a battle royale participant with
+ * the spec's ten-state machine, looting, healing, storm rotation and bot-vs-bot combat,
+ * so the earlier sandbox-era tests here were testing an API the spec superseded.
+ */
