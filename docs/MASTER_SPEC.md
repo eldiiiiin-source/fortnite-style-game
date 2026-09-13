@@ -2,396 +2,434 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Baseline v0.1 — awaiting the user's authoritative specification** |
-| Version | 0.1.0 |
+| Status | **Authoritative — supplied by the project owner, 2026-09-13** |
+| Version | 1.0.0 |
 | Owner | eldin.omerhodzic@icloud.com |
-| Scope | Player, movement, camera, combat, building, editing, materials, loot, UI, match flow |
-| Companion | `docs/MAP_SPEC.md` (world, terrain, POIs, loot distribution) |
+| Supersedes | Baseline v0.1.0 (temporary placeholder, now void) |
+| Companion | `docs/MAP_SPEC.md`, `references/map/02-chapter2-season1-references.md` |
 
-> **Read before editing.** This baseline fills the structure with genre-standard,
-> internally consistent, playable values so that `src/` can be implemented and tested
-> today. It is a placeholder for the full gameplay specification the project owner will
-> supply. When that specification arrives, replace the numbers and rules here — keep the
-> section numbering so code comments and tests that cite `§3.2` keep resolving — then
-> bring `src/core/Config.js` and `tests/` in line in the same change.
+**If the implementation conflicts with this document, this document wins.** Do not
+preserve wrong architecture merely because it already exists. Refactor properly.
+
+Original assets, branding, characters, world geometry and code throughout. No proprietary
+source, assets, sounds, music, maps, skins, animations or textures from any shipped game.
 
 ---
 
-## 1. Design pillars
+## 0. How to read this document
 
-1. **Build is a movement verb, not a menu.** Placing a wall, ramp, floor, or cone must be
-   as fast and as thoughtless as jumping. Any mechanic that adds a confirmation step to
-   placement is wrong.
-2. **Every fight is a 3D problem.** Height wins. The map, the weapons, and the build set
-   must all reward taking and holding high ground.
-3. **Readable at a glance.** Enemy, material type, rarity, and structure ownership must
-   be identifiable in under 200 ms from a still frame.
-4. **Low time-to-skill-expression, high skill ceiling.** A new player can place a ramp in
-   their first minute. Edit courses take hundreds of hours to master.
-5. **Deterministic simulation.** Same inputs, same seed, same result. No gameplay logic
-   reads `Math.random()` directly (§11.1) and none reads wall-clock frame time (§2.1).
+The owner's specification is overwhelmingly **behavioural and architectural**. It fixes a
+small number of hard values and a large number of required behaviours. Two markers
+separate them, and the distinction is load-bearing:
 
-## 2. Simulation model
-
-### 2.1 Tick and timing
-
-| Parameter | Value |
+| Marker | Meaning |
 | --- | --- |
-| Simulation tick rate | 30 Hz fixed (`33.333 ms`) |
-| Max simulation steps per frame | 5 (spiral-of-death guard) |
-| Render rate | Uncapped, interpolated between the two latest sim states |
-| Interpolation | Position and yaw/pitch lerp; discrete state (e.g. `isEditing`) snaps |
-| Units | Metres, seconds, radians, kilograms |
+| **[OWNER]** | Stated by the owner. Authoritative. Changing it requires the owner. |
+| **[PROV]** | Provisional tuning. The owner's spec is silent; the value is carried over from the baseline or derived so the system can be built and tested. **Expected to change.** Flagged for sign-off in §46. |
 
-Gameplay code never uses real frame time. `Loop.js` owns an accumulator and calls
-`update(FIXED_DT, ctx)`; the renderer reads an interpolation alpha.
+Every `[PROV]` number lives in `src/core/Config.js` like any other, so retuning is a
+one-file change. No `[PROV]` value may contradict an `[OWNER]` behaviour.
 
-### 2.2 Coordinate system
+## 1. Global priorities [OWNER]
 
-Right-handed, **Y up**. `+X` east, `+Z` south, `-Z` north. Yaw 0 faces `-Z` (north) and
-increases clockwise when viewed from above. Pitch is positive looking up.
+1. Input responsiveness
+2. Movement
+3. Camera
+4. Building
+5. Editing
+6. Edited collision
+7. Combat
+8. Inventory / loot
+9. HUD
+10. Match systems
+11. Audio
+12. Visual polish
+13. Large map expansion
 
-## 3. Player
+**Gameplay feel matters more than graphics.** Stable 60 FPS is a hard target. Core
+responsiveness is never traded for visual detail.
 
-### 3.1 Vitals
+## 2. Technical principles [OWNER]
 
-| Stat | Value |
-| --- | --- |
-| Max health | 100 |
-| Max shield | 100 |
-| Starting health | 100 |
-| Starting shield | 0 |
-| Health regeneration | None (consumables only) |
-| Shield regeneration | None (consumables only) |
-| Damage order | Shield absorbs first, then health. Overflow carries into health in the same hit. |
-| Fall damage | `max(0, (fallDistance - 3.5 m)) * 10` HP, ignores shield, capped at 100 |
-| Down-but-not-out | Disabled in v0.1 (solo-only). Reserved for §12. |
+- Modular architecture. No magic numbers spread across the codebase; tuning lives in
+  central configuration.
+- These concerns stay separated: input, player movement, camera, building, editing,
+  collision, combat, weapons, inventory, loot, world, UI, settings, audio, game state.
+- Core systems must be testable independently.
+- **No structural problem is solved with random offsets or one-off hacks.** If a system is
+  fundamentally wrong, rewrite it.
 
-### 3.2 Movement
+## 3. Simulation model
 
-Horizontal movement is velocity-driven with separate ground and air acceleration.
+| Parameter | Value | Marker |
+| --- | --- | --- |
+| Simulation tick rate | **60 Hz fixed** (16.667 ms) | [PROV] |
+| Max simulation steps per frame | 5 | [PROV] |
+| Render | Interpolated between the two latest sim states | [PROV] |
+| Units | Metres, seconds, radians | [PROV] |
+
+> **Change from baseline:** the baseline simulated at 30 Hz. Input responsiveness is
+> priority 1 and the spec requires input sampled reliably every frame with no dropped
+> build or edit inputs; a 30 Hz tick adds up to 33 ms of input latency before a build even
+> starts. 60 Hz halves that and matches the 60 FPS target. Flagged in §46.
+
+Gameplay code never reads wall-clock frame time. Coordinate system is right-handed, **Y
+up**; yaw 0 faces `-Z`, pitch positive looking up.
+
+## 4. Input system [OWNER]
+
+Input is sampled reliably **every frame**. Build and edit inputs are never dropped.
+Keyboard and mouse supported. Mouse buttons are valid binds. **Mouse wheel up and mouse
+wheel down are independently bindable.**
+
+### 4.1 Bindable actions — all required
+
+`moveForward`, `moveBackward`, `moveLeft`, `moveRight`, `jump`, `crouch`, `sprint`,
+`interact`, `fire`, `aim`, `reload`, `pickaxe`, `weaponSlot1`–`weaponSlot5`, `wall`,
+`floor`, `ramp`, `cone`, `edit`, `confirmEdit`, `resetEdit`, `inventory`, `map`,
+`settings`.
+
+### 4.2 Required input options [OWNER]
+
+- **Confirm edit on release: ON / OFF**
+- Mouse wheel reset editing
+- Direct build piece binds
+- Rapid switching between combat and building
+
+### 4.3 Architecture requirements
+
+- Edge state (`wasPressed` / `wasReleased`) survives to the tick that consumes it — a
+  press between ticks is never lost.
+- Mouse look reads raw deltas, never smoothed values.
+- Build and edit intents are **buffered**, not discarded (§11).
+- Bind conflicts are detected and surfaced clearly (§40).
+
+### 4.4 Default binds [PROV]
+
+| Action | Default | Action | Default |
+| --- | --- | --- | --- |
+| Move | `W` `A` `S` `D` | Wall | `Q` |
+| Jump | `Space` | Floor | `F` |
+| Crouch | `Ctrl` | Ramp | `C` |
+| Sprint | `Shift` | Cone | `V` |
+| Fire | `Mouse0` | Edit | `G` |
+| Aim | `Mouse2` | Confirm edit | `Mouse0` |
+| Reload | `R` | **Reset edit** | **`WheelDown`** [OWNER] |
+| Pickaxe | `1` | Interact | `E` |
+| Weapon slots 1–5 | `1`–`5` | Map | `M` |
+| Inventory | `Tab` | Settings | `Esc` |
+
+## 5. Player movement [OWNER]
+
+Movement must feel **crisp and responsive**.
+
+Required: walking, sprinting, crouching, jumping, air movement, mantling, slope
+traversal, step-up handling, swimming where water is present. Tactical sprint is an
+optional later feature and is **not** in scope now.
+
+**Explicitly avoided:** floaty movement, excessive inertia, uncontrolled sliding, overly
+realistic physics, sluggish acceleration, sticky movement, accidental slope launches.
+
+### 5.1 Movement must support fast building [OWNER]
+
+The player must be able to do all of the following **without the movement controller
+fighting them**:
+
+- sprint while placing builds
+- jump while building
+- turn quickly
+- perform 90s
+- perform protected ramp pushes
+- perform double edits
+- perform triple edits
+
+This is a correctness requirement, not a feel goal. It is tested in §44.
+
+### 5.2 Movement feel [OWNER]
+
+- Responsive acceleration model; intended speed is reached **quickly**.
+- Stopping and direction changes feel **deliberate**.
+- Air control exists but must not feel like flying.
+- Jump arc is **predictable and consistent**.
+
+### 5.3 Movement values [PROV]
 
 | Parameter | Value |
 | --- | --- |
 | Walk speed | 4.6 m/s |
 | Sprint speed | 7.6 m/s |
 | Crouch speed | 2.4 m/s |
-| Ground acceleration | 60 m/s² |
-| Ground friction | 10 (exponential damping coefficient) |
-| Air acceleration | 12 m/s² |
-| Air control cap | 1.6 m/s of lateral steering authority per tick |
-| Air drag | 0.4 |
+| Swim speed | 3.4 m/s |
+| Ground acceleration | 85 m/s² |
+| Ground friction | 12 |
+| Air acceleration | 14 m/s² |
+| Air control cap | 2.0 m/s per tick |
 | Gravity | 22 m/s² |
-| Jump velocity | 7.4 m/s (apex 1.24 m, 0.67 s airtime — derived from gravity above) |
+| Jump velocity | 7.4 m/s (apex 1.24 m, 0.67 s airtime) |
 | Terminal velocity | 60 m/s |
-| Step height | 0.45 m (auto-step, no jump required) |
-| Max walkable slope | 48° |
-| Capsule | radius 0.4 m, standing height 1.85 m, crouched height 1.25 m |
+| Step height | 0.45 m |
+| Max walkable slope | 50° |
 | Coyote time | 100 ms |
 | Jump buffer | 120 ms |
-| Sprint ramp | Instant to sprint, 250 ms decay back to walk |
 
-Notes:
-- Sprint requires forward input within ±60° of the movement vector and is cancelled by
-  firing, aiming, or entering build mode with a piece placed (§6.6).
-- Crouch does not slow the mantle or edit speed.
-- Mantling: a ledge between 0.45 m and 1.7 m above the capsule base, with 0.6 m of
-  clearance behind it, is vaulted in 350 ms.
+> Ground acceleration is raised from the baseline's 60 and air accel from 12, per §5.2's
+> "reaches intended speed quickly" and the §5.1 build-mobility requirement.
 
-### 3.3 Camera
+### 5.4 Crouch [OWNER]
 
-Third-person orbit camera behind the right shoulder.
+Crouching reduces player height, **updates the collision capsule**, **updates camera
+height**, and remains responsive during build and edit workflows.
 
-| Parameter | Value |
-| --- | --- |
-| Default distance | 3.2 m |
-| Shoulder offset | +0.55 m X (right), +1.55 m Y |
-| FOV (hip) | 80° |
-| FOV (ADS) | 55°, or weapon-specific (§5.4) |
-| Pitch clamp | −85° to +85° |
-| Look sensitivity | 0.0022 rad per mouse count at 1.0 user sensitivity |
-| ADS sensitivity multiplier | 0.6 |
-| Collision | Sphere-cast radius 0.25 m; camera pulls in to the hit point minus 0.1 m |
-| Build-mode distance | 3.6 m (pulls back slightly for placement readability) |
-| Transition | 120 ms critically-damped spring on distance and FOV |
-
-Camera never clips through owned or enemy structures; it pulls in instead.
-
-### 3.4 Player states
-
-`Grounded`, `Airborne`, `Sprinting`, `Crouched`, `Mantling`, `Building`, `Editing`,
-`Harvesting`, `Downed` (reserved), `Dead`.
-
-`Building` and `Editing` are mutually exclusive. Entering either preserves movement state;
-the player can run, jump, and fall while building or editing.
-
-## 4. Materials and harvesting
-
-### 4.1 Material types
-
-| Material | Cap | Build HP (full) | Build time | Character |
-| --- | --- | --- | --- | --- |
-| Wood | 500 | 150 | 3.5 s to full | Fastest to full HP, weakest ceiling |
-| Stone | 500 | 300 | 11 s to full | Middle |
-| Metal | 500 | 500 | 20 s to full | Slowest, strongest |
-
-A freshly placed piece starts at its **initial HP** and ramps linearly to full HP over its
-build time (§6.4).
-
-| Material | Initial HP | Full HP | Ramp |
-| --- | --- | --- | --- |
-| Wood | 90 | 150 | 3.5 s |
-| Stone | 90 | 300 | 11.0 s |
-| Metal | 90 | 500 | 20.0 s |
-
-### 4.2 Harvesting
-
-| Parameter | Value |
-| --- | --- |
-| Tool | Harvesting tool, always equipped in slot 0, cannot be dropped |
-| Swing interval | 0.55 s |
-| Damage to harvestables | 75 |
-| Damage to players | 20 |
-| Damage to structures | 100 (enemy), 0 (own — own builds are never damaged by your tool) |
-| Weak-point bonus | Hitting the highlighted weak point yields ×2 materials and destroys faster |
-| Range | 3.0 m |
-
-Yield per swing (see `docs/MAP_SPEC.md` §6 for which sources appear where):
-
-| Source | Material | Per swing | Total before depletion |
-| --- | --- | --- | --- |
-| Tree | Wood | 12 | 50 |
-| Wooden pallet / fence | Wood | 10 | 30 |
-| Boulder / rock | Stone | 14 | 60 |
-| Brick wall | Stone | 11 | 40 |
-| Vehicle wreck | Metal | 12 | 70 |
-| Shipping container | Metal | 14 | 90 |
-| Streetlight / rail | Metal | 10 | 30 |
-
-Materials above the 500 cap are discarded. Harvestables respawn only between matches.
-
-## 5. Combat
-
-### 5.1 Damage model
-
-Damage is applied to shield first, then health (§3.1).
-
-| Hit region | Multiplier |
-| --- | --- |
-| Head | ×2.0 (×1.5 for shotguns) |
-| Torso / arms | ×1.0 |
-| Legs | ×1.0 |
-
-Structures take flat weapon damage with no location multiplier and no falloff.
-
-### 5.2 Weapon rarity
-
-| Rarity | Colour | Damage multiplier vs Common |
+| Parameter | Value | Marker |
 | --- | --- | --- |
-| Common | `#B0B0B0` grey | ×1.00 |
-| Uncommon | `#4CD94C` green | ×1.05 |
-| Rare | `#3B8EEA` blue | ×1.10 |
-| Epic | `#B14CE8` purple | ×1.16 |
-| Legendary | `#E8A33B` gold | ×1.22 |
+| Standing capsule height | 1.85 m | [PROV] |
+| Crouched capsule height | 1.25 m | [PROV] |
+| Capsule radius | 0.4 m | [PROV] |
+| Crouch transition | 120 ms, camera and capsule together | [PROV] |
 
-Rarity affects damage only. Fire rate, magazine, spread, and reload are identical across
-rarities of the same weapon so that weapon feel is learnable.
+### 5.5 Mantling [OWNER]
 
-### 5.3 Weapon classes
+Mantling triggers **only** when the target ledge is valid, the player is in range, and the
+vertical difference is within allowed limits. **No accidental mantling during normal
+building.**
 
-Base values are for **Common** rarity. `DPS` is sustained, ignoring reload.
+| Parameter | Value | Marker |
+| --- | --- | --- |
+| Min ledge height | 0.45 m (above step height) | [PROV] |
+| Max ledge height | 1.7 m | [PROV] |
+| Required clearance behind ledge | 0.6 m | [PROV] |
+| Forward reach | 0.9 m | [PROV] |
+| Duration | 350 ms | [PROV] |
+| **Suppressed while** | build mode active, edit mode active, or a build was placed in the last 200 ms | [OWNER] |
 
-| Class | Damage | Fire rate (rps) | Mag | Reload | Range profile | Structure dmg |
-| --- | --- | --- | --- | --- | --- | --- |
-| Assault Rifle | 30 | 5.5 | 30 | 2.3 s | Hitscan, falloff §5.5 | 30 |
-| SMG | 17 | 11.0 | 30 | 2.1 s | Hitscan, falloff §5.5 | 17 |
-| Pump Shotgun | 9 × 10 pellets | 0.75 | 5 | 4.5 s | Hitscan cone, §5.6 | 100 |
-| Tactical Shotgun | 6 × 10 pellets | 1.6 | 8 | 3.6 s | Hitscan cone, §5.6 | 80 |
-| Bolt Sniper | 105 | 0.55 | 1 | 2.8 s | Hitscan, no falloff | 125 |
-| Pistol | 24 | 6.75 | 16 | 1.5 s | Hitscan, falloff §5.5 | 24 |
-| Rocket Launcher | 100 direct / 75 splash | 0.6 | 1 | 3.2 s | Projectile 45 m/s | 400 |
+The suppression rule is the direct implementation of "no accidental mantling during normal
+building" and is tested.
 
-### 5.4 ADS
+## 6. Player collision [OWNER]
 
-| Class | ADS FOV | ADS time | Hip spread | ADS spread |
-| --- | --- | --- | --- | --- |
-| Assault Rifle | 55° | 0.24 s | 3.2° | 0.6° |
-| SMG | 62° | 0.18 s | 4.4° | 1.4° |
-| Shotguns | 65° | 0.28 s | (pellet cone, §5.6) | (pellet cone × 0.7) |
-| Bolt Sniper | 28° (scoped) | 0.40 s | 12.0° | 0.0° |
-| Pistol | 58° | 0.20 s | 2.8° | 0.5° |
-| Rocket Launcher | 60° | 0.35 s | 1.5° | 0.4° |
+Stable capsule (or equivalent). Collision must behave **predictably** with floors, ramps,
+stairs, edited walls, edited ramps, terrain, roofs and props.
 
-### 5.5 Spread and falloff
+- The player must not snag on tiny geometry unnecessarily.
+- Step-up handling allows traversal of small height changes **without jumping**.
+- Step-up and step-down are distinct cases; a falling player never takes the step path.
 
-Spread grows with sustained fire and with movement:
+## 7. Third-person camera [OWNER]
+
+**Close, over-the-right-shoulder.** The character sits **slightly left of screen centre**.
+
+Must support: smooth mouse look, adjustable sensitivity, adjustable FOV, camera collision,
+obstruction handling, crouch height adjustment, jumping, building, editing, ADS
+transitions, weapon alignment.
+
+**The camera must not be too high or too far away.** It must remain precise enough for
+fast edits.
+
+| Parameter | Value | Marker |
+| --- | --- | --- |
+| Distance | 2.6 m | [PROV] |
+| Shoulder offset (right) | 0.45 m | [PROV] |
+| Height above player base | 1.55 m | [PROV] |
+| Pitch clamp | −85° to +85° | [PROV] |
+| Base FOV | 80° (user-adjustable, §39) | [PROV] |
+| Crouch camera drop | 0.6 m, 120 ms | [PROV] |
+| Build-mode distance | 2.6 m — **unchanged**, edit precision | [OWNER-derived] |
+
+> **Change from baseline:** distance reduced 3.2 → 2.6 m and shoulder offset 0.55 → 0.45 m
+> per "close" and "not too far away". The baseline also pulled the camera *back* in build
+> mode, which directly contradicts "precise enough for fast edits" — that behaviour is
+> removed.
+
+### 7.1 Camera collision [OWNER]
+
+The camera must not clip through walls or terrain. When blocked:
+
+- move the camera **closer to the player**
+- **avoid hard snapping** where possible
+- **restore distance smoothly** when clear
+- geometry must not fully obscure the player for long periods
+
+| Parameter | Value | Marker |
+| --- | --- | --- |
+| Probe radius | 0.25 m | [PROV] |
+| Padding off hit surface | 0.10 m | [PROV] |
+| Pull-in response | immediate (no lag into geometry) | [OWNER] |
+| Restore rate | smoothed, ~8 m/s | [PROV] |
+
+Asymmetric by design: pulling in is instant (clipping is never acceptable), restoring is
+smoothed (per "restore distance smoothly").
+
+## 8. Aiming and crosshair alignment [OWNER]
+
+**The crosshair and weapon ray must agree.** Targeting uses the **camera aim direction**.
+Projectile and hitscan logic resolve consistently with what the player sees.
+
+There must never be a case where the crosshair is on target and the weapon fires beside it.
+
+ADS tightens FOV, shifts the camera if needed, **maintains the correct aim ray**, and
+transitions smoothly.
+
+> **This is a bug in the current implementation.** `Game._resolveShot` traces from the
+> player's eye position along the player's look vector. The camera is offset to the right
+> shoulder, so the traced ray does not match the rendered crosshair — exactly the failure
+> the spec forbids. The fix is architectural: a single shared aim ray, originating at the
+> camera, used by shooting, build targeting and edit targeting alike.
+
+### 8.1 The shared aim ray [OWNER-derived]
+
+One function produces the aim ray. Every system consumes it:
 
 ```
-spread = base
-       + bloomPerShot * min(shotsInBurst, bloomCap)
-       + movementPenalty
+aimRay = { origin: camera.position, direction: camera.forward }
 ```
 
-| Parameter | Value |
-| --- | --- |
-| `bloomPerShot` | 0.45° (AR), 0.30° (SMG), 0.35° (Pistol) |
-| `bloomCap` | 8 shots |
-| Bloom decay | 9°/s, starts 0.25 s after the last shot |
-| Movement penalty | `0.55° * (horizontalSpeed / walkSpeed)`, doubled while airborne |
-| Crouch bonus | ×0.75 on the final spread |
+Weapon tracing, build placement targeting and edit targeting all use it. No system
+computes its own aim direction.
 
-Damage falloff by distance (linear interpolation between stops, applied to hitscan
-classes marked "falloff §5.5"):
+## 9. Building system [OWNER]
 
-| Distance | Multiplier |
-| --- | --- |
-| 0 – 35 m | ×1.00 |
-| 35 – 60 m | ×1.00 → ×0.80 |
-| 60 – 90 m | ×0.80 → ×0.65 |
-| 90 m+ | ×0.65 |
+Required pieces: **WALL**, **FLOOR**, **RAMP**, **CONE / ROOF**.
 
-### 5.6 Shotgun pellets
+Building must feel **immediate**. Required behaviours: snap to grid, preview before
+placement, place instantly, support rapid repeated placement, support building while
+moving, support building while jumping, support rotation where appropriate, support
+material selection, support ownership, support build health, support destruction, support
+editing.
 
-Pellets are fired in a deterministic sunflower pattern (not uniform random) so spread is
-learnable, jittered by ±15 % of the ring spacing using the match RNG stream (§11.1).
+### 9.1 Build grid [OWNER]
 
-| Parameter | Pump | Tactical |
+Consistent grid. All pieces align correctly. Placement is **deterministic**.
+**No cumulative drift. No arbitrary per-piece offsets.**
+
+Grid logic supports: builds above, builds below, builds to the side, chaining pieces
+rapidly, and **building through fast camera turns**.
+
+| Parameter | Value | Marker |
 | --- | --- | --- |
-| Pellets | 10 | 10 |
-| Cone half-angle | 4.5° | 6.0° |
-| Falloff | ×1.0 to 8 m, → ×0.55 at 22 m, ×0.35 beyond | ×1.0 to 6 m, → ×0.5 at 18 m, ×0.3 beyond |
-| Headshot multiplier | ×1.5 | ×1.5 |
+| Tile footprint | 5.12 m × 5.12 m | [PROV] |
+| Wall height | 3.84 m | [PROV] |
+| Piece thickness | 0.20 m | [PROV] |
+| Ramp slope | 36.87° (3.84 rise / 5.12 run) | [PROV, derived] |
 
-Pellets share one structure-damage budget: a shotgun deals its listed structure damage
-once per shot, not once per pellet.
+Cells are integer `(cx, cy, cz)` addressed from world origin, axis-aligned, never rotated.
+Slots per cell: `floor`, `ramp`, `cone`, `wall:north|east|south|west`.
 
-### 5.7 Inventory
+Integer cell addressing is what satisfies "no cumulative drift" — positions are computed
+from indices, never accumulated.
 
-| Parameter | Value |
-| --- | --- |
-| Slots | 6 — slot 0 is the harvesting tool (fixed), slots 1–5 are free |
-| Slot switching | 0.25 s, cancels reload, cannot be cancelled by firing |
-| Stack sizes | Light/Medium/Heavy ammo 999, Shells 60, Rockets 12, consumables 3–6 |
-| Drop | Dropping a weapon drops it with its current magazine |
-| Pickup | 0.4 s hold; swaps into the selected slot if the inventory is full |
+### 9.2 Build preview [OWNER]
 
-Ammo types: Light (SMG, Pistol), Medium (AR), Heavy (Sniper), Shells (Shotguns),
-Rockets (Rocket Launcher).
+Translucent preview of **the exact piece that will be placed**. It must match final
+geometry, final rotation and final position; reflect valid/invalid placement; and update
+immediately.
 
-### 5.8 Consumables
+**Preview collision and final collision must not disagree.** The preview is generated from
+the same geometry source as the placed piece — never a separate approximation.
 
-| Item | Use time | Effect | Stack |
+### 9.3 Placement responsiveness [OWNER]
+
+Placement must **not visibly lag behind input**. These sequences must work reliably:
+
+- wall → floor → ramp
+- wall → wall → ramp
+- 90s
+- tunnelling
+- protected ramp rushes
+
+**Use input buffering or queued placement if necessary. Do not silently drop build inputs
+because a previous placement happened milliseconds earlier.**
+
+> **This is a violation in the current implementation.** The baseline rejects placements
+> inside a 0.10 s window with `RATE_LIMITED` and discards the input. That is precisely the
+> banned behaviour. Replaced by a **placement queue**: an input arriving during the
+> cooldown is buffered and executed when the window opens.
+
+| Parameter | Value | Marker |
+| --- | --- | --- |
+| Placement cooldown | 0.05 s | [PROV] |
+| Queue depth | 3 intents | [PROV] |
+| Queued intent lifetime | 0.25 s, then discarded as stale | [PROV] |
+| Placement range | 12.0 m | [PROV] |
+| Cost per piece | 10 material | [PROV] |
+
+### 9.4 Materials [OWNER]
+
+**WOOD, BRICK, METAL.** Each has different health, distinct visual appearance, different
+construction progression, a material count and a placement cost.
+
+> **Change from baseline:** the baseline's second material was `stone`. The spec says
+> **BRICK**. Renamed throughout — config, HUD, renderer, tests.
+
+Placeholder material visuals are acceptable while mechanics are correct.
+
+| Material | Initial HP | Full HP | Build time | Marker |
+| --- | --- | --- | --- | --- |
+| Wood | 90 | 150 | 3.5 s | [PROV] |
+| Brick | 90 | 300 | 11.0 s | [PROV] |
+| Metal | 90 | 500 | 20.0 s | [PROV] |
+
+Material cap 500 each [PROV].
+
+### 9.5 Build health and damage [OWNER]
+
+Structures have health, receive weapon damage, receive pickaxe damage, are destroyable, and
+**correctly remove collision on destruction**.
+
+**No invisible collision after destruction.** Destroying a piece removes its collider in
+the same tick the piece is removed — verified by test.
+
+## 10. Editing system [OWNER]
+
+Editing is a **critical system** and must be **extremely responsive**.
+
+On entering edit mode the game must:
+
+1. identify the **exact** build piece being aimed at
+2. reject invalid target selection cleanly
+3. show the edit grid
+4. allow precise tile selection
+5. allow **click-and-drag** selection
+6. highlight selected tiles **immediately**
+7. validate the pattern
+8. confirm the edit
+9. **update geometry**
+10. **update collision**
+11. exit the edit state correctly
+
+### 10.1 Edit targeting [OWNER]
+
+Editing targets the build **under the player's crosshair**. **Do not guess based on
+nearest build if the aimed build is clear.** Uses the §8.1 shared aim ray.
+
+If the player moves too far away: cancel edit mode, remove edit UI, restore normal
+controls. **No stuck edit state.**
+
+| Parameter | Value | Marker |
+| --- | --- | --- |
+| Max edit distance | 8.0 m | [PROV] |
+| Targeting method | ray/AABB intersection against piece geometry, nearest hit wins | [OWNER] |
+
+> **Change from baseline:** the baseline marched a ray cell-by-cell and then picked a
+> piece from the cell by a type preference order — that is "guessing", which the spec
+> forbids. Replaced with true geometric intersection against each piece's bounds.
+
+### 10.2 Edit grids — per piece type [OWNER]
+
+**This is the single largest correction to the baseline.** Grids are **not** uniform:
+
+| Piece | Grid | Tiles | Baseline had |
 | --- | --- | --- | --- |
-| Bandage | 3.0 s | +15 HP, caps at 75 HP | 5 |
-| Medkit | 8.0 s | Health to 100 | 3 |
-| Small Shield | 2.0 s | +25 shield, caps at 50 | 6 |
-| Shield Potion | 5.0 s | +50 shield, caps at 100 | 3 |
+| **Wall** | **3 × 3** | 9 | 3 × 3 ✅ correct |
+| **Floor** | **2 × 2** | 4 | 3 × 3 ❌ wrong |
+| **Cone / roof** | **2 × 2** | 4 | 3 × 3 ❌ wrong |
+| **Ramp / stair** | **3 rows × 2 columns** | 6 | 3 × 3 ❌ wrong |
 
-Using a consumable locks movement to walk speed and is cancelled by taking damage
-(progress is lost, the item is not consumed).
+The edit-pattern module, the pattern tables, the overlay UI, the collision builder and
+every edit test are rewritten around per-type grid dimensions.
 
-## 6. Building
+### 10.3 Wall editing — 3 × 3 [OWNER]
 
-### 6.1 Grid
-
-The world is divided into a uniform build grid.
-
-| Parameter | Value |
-| --- | --- |
-| Tile size | 5.12 m × 5.12 m footprint |
-| Tile height | 3.84 m (wall height) |
-| Grid origin | World origin `(0, 0, 0)`, axis-aligned, never rotated |
-| Snapping | Pieces snap to the nearest cell face/edge; no free placement |
-| Vertical layers | Unlimited up to the build ceiling (`MAP_SPEC §3.4`) |
-
-A cell is addressed by integer `(cx, cy, cz)`. Within a cell, a piece occupies one of:
-- **Floor** slot (1 per cell, at the cell's base)
-- **Wall** slots (4 per cell — N, E, S, W faces)
-- **Ramp** slot (1 per cell, with a direction N/E/S/W)
-- **Cone** slot (1 per cell, "pyramid", shares the cell volume with a floor and walls)
-
-### 6.2 Piece set
-
-| Piece | Occupies | Purpose |
-| --- | --- | --- |
-| Wall | One cell face, full height | Block line of sight and movement |
-| Floor | Cell base | Platform, ceiling for the cell below |
-| Ramp (stair) | Cell volume, directional | Gain height; 3.84 m rise over 5.12 m run (36.9°) |
-| Cone (pyramid) | Cell volume | Head protection, ramp-push protection |
-
-All four are available in all three materials. There are no other piece types in v0.1.
-
-### 6.3 Placement rules
-
-1. **Cost:** 10 material per piece, deducted at placement.
-2. **Placement range:** 12.0 m from the camera to the target cell centre.
-3. **Preview:** A translucent ghost shows the target piece every frame. Green = placeable,
-   red = blocked.
-4. **Blocked if:** the slot is occupied by any piece; the piece would intersect a player
-   capsule (any player, including the builder); the target cell is above the build ceiling
-   or outside the playable boundary; the player lacks 10 of the selected material.
-5. **Terrain intersection is allowed** — pieces clip into terrain and are simply partially
-   buried. Terrain never blocks placement.
-6. **Placement rate:** unlimited on distinct slots; `0.10 s` minimum between placements
-   to bound network and input spam.
-7. **Turbo build:** holding the fire button while a build piece is selected places into
-   every valid slot the crosshair crosses, at a minimum interval of `0.15 s`.
-
-### 6.4 Build health and the ramp
-
-A placed piece starts at 90 HP and ramps linearly to its material's full HP over the
-material's build time (§4.1). While ramping, the piece renders with a build-in shader
-sweep. Damage taken during the ramp does not reset the ramp; the piece's HP is
-`min(currentHP, rampedMaxHP)`.
-
-### 6.5 Structure integrity
-
-Pieces are connected in a support graph. A piece is **supported** if it transitively
-connects to the terrain.
-
-- Floors are supported by: a wall on any of their four edges, a ramp or cone in the cell
-  below, the terrain beneath them, or an adjacent supported floor.
-- Walls are supported by: the terrain at their base, a floor at their base, or a supported
-  wall directly below.
-- Ramps and cones are supported by: the terrain, a floor in their cell, or a supported
-  piece in the cell below.
-
-When a piece is destroyed, its dependents are re-evaluated. Unsupported pieces are
-destroyed after a `0.35 s` grace period, cascading outward. Cascade destruction deals no
-damage to players; falling structures do not crush.
-
-### 6.6 Build mode
-
-| Parameter | Value |
-| --- | --- |
-| Enter | Press a build key (`F1`–`F4` or `Q` to toggle to last-used) |
-| Exit | Weapon slot key, or `Q` toggle |
-| Enter/exit time | 0 s — instant, no animation lock |
-| Rotation | `R` cycles ramp/cone direction through N → E → S → W |
-| Material swap | `Mouse wheel` or `F5` cycles Wood → Stone → Metal |
-| Movement | Unrestricted; sprint is allowed while a piece is selected but not while placing |
-
-Selected piece and material persist across deaths within a match.
-
-### 6.7 Damage to structures
-
-- Weapons deal their listed structure damage (§5.3), no falloff, no headshot.
-- The harvesting tool deals 100 to enemy structures, 0 to own.
-- Destroying a piece yields **no** material refund.
-- A piece under construction (§6.4) takes the same damage as a finished one.
-- Friendly fire on own structures is disabled; team structures take 0 damage from
-  teammates in team modes (reserved, §12).
-
-## 7. Editing
-
-### 7.1 Edit grid
-
-Every piece exposes a 3×3 edit grid on its face (walls, floors, cones) or a 3×3 grid on
-the ramp's footprint. The player selects a subset of the nine tiles; the resulting shape
-is looked up in the piece's pattern table. Invalid selections are rejected and the piece
-is unchanged.
-
-Tile indices, viewed face-on from the editing player:
+Tile indices, face-on from the editing player:
 
 ```
 0 1 2
@@ -399,197 +437,443 @@ Tile indices, viewed face-on from the editing player:
 6 7 8
 ```
 
-### 7.2 Edit flow and timing
+Required valid patterns: single window, centred window, side window, door, door + window,
+corner opening, half wall, top row removed, three-tile opening, arch-like opening where
+appropriate, and common competitive wall edits. **Invalid patterns must be rejected.**
 
-| Step | Input | Time |
+Implemented as an allow list so anything unlisted is rejected by construction.
+
+### 10.4 Wall collision [OWNER]
+
+**Edited wall collision must match the visible edited shape.** If the wall visually has an
+opening, **the player must be able to pass through it**.
+
+**Do not keep the full original wall collider after edit.**
+
+**A three-tile opening must provide enough clearance for the player capsule.** With a
+5.12 m tile, one edit tile is 1.706 m wide against a 0.8 m capsule diameter — a
+single-tile opening already clears, and a three-tile opening clears comfortably. This is
+asserted by test, not assumed.
+
+### 10.5 Floor editing — 2 × 2 [OWNER]
+
+```
+0 1
+2 3
+```
+
+Required: one quarter removed, half floor, directional half variants, reset.
+**Edited floor collision must match the remaining geometry.**
+
+### 10.6 Cone editing — 2 × 2 [OWNER]
+
+Required: common directional edit forms. **Collision must update to match transformed
+geometry.**
+
+### 10.7 Ramp / stair editing — 3 rows × 2 columns [OWNER]
+
+```
+[0][1]
+[2][3]
+[4][5]
+```
+
+Required: normal stair, flipped stair, rotated stair, directional variants, half-stair
+style edits where valid, reset.
+
+**The visual stair must correspond directly to the edit grid.**
+
+### 10.8 Ramp collision [OWNER] — MANDATORY
+
+> "If the ramp is flipped or transformed: the previous collision must disappear. Never
+> leave stale collision from the old orientation. Collision must be rebuilt or swapped
+> immediately."
+
+The old collider is **destroyed**, not hidden, disabled or offset. Rebuild happens in the
+same tick as the geometry change. Asserted by a dedicated test.
+
+### 10.9 Edit reset [OWNER]
+
+Instant edit reset. Default bind **MOUSE WHEEL DOWN**.
+
+Workflow: aim at an edited build → trigger reset bind → **structure resets immediately**.
+
+Confirm-on-release must be supported as **ON/OFF**.
+
+### 10.10 Edit performance [OWNER]
+
+These must work repeatedly **without dropped inputs**: wall edit, floor edit, cone edit,
+ramp edit, **double edit**, **triple edit**, **edit-reset-edit loops**.
+
+### 10.11 Edit invariants [OWNER-derived]
+
+- Editing never changes a piece's HP, material or owner.
+- Editing costs and refunds no material.
+- Removing every tile deletes the piece and triggers support re-evaluation.
+- Only the owning player may edit a piece.
+
+## 11. Edited collision [OWNER] — priority 6
+
+A first-class system. **It does not exist in the current implementation** — the baseline
+renders edits but collides against the unedited piece.
+
+Requirements:
+
+- Collision is generated **from the edit pattern**, so geometry and collision share one
+  source and cannot drift apart.
+- The old collider is destroyed on every edit, reset and destruction.
+- Openings are passable; remaining geometry is solid.
+- Rebuild is immediate — same tick.
+- No stale collider may survive any edit, flip, reset or destruction.
+
+### 11.1 Representation [PROV]
+
+Each piece resolves to a set of solid boxes in piece-local space, derived from its type and
+current edit pattern:
+
+- **Wall** — a 3 × 3 lattice of `(tile/3) × (wallHeight/3) × thickness` boxes; removed
+  tiles contribute no box.
+- **Floor** — a 2 × 2 lattice of `(tile/2) × thickness × (tile/2)` boxes.
+- **Cone** — 2 × 2 quadrants of the pyramid.
+- **Ramp** — 6 stepped boxes on the 3 × 2 grid, each at its row's height.
+
+Collision queries test these boxes. The renderer draws the same set. One source, no drift.
+
+## 12. Weapon system [OWNER]
+
+Required categories: **assault rifle, shotgun, SMG, pistol, sniper, utility, healing
+consumables**.
+
+Each weapon defines: damage, fire rate, magazine size, **reserve ammo**, reload time,
+spread, **recoil**, headshot multiplier, **equip time**, rarity, ammo type, and
+hitscan/projectile behaviour.
+
+> **Gaps against baseline:** no `recoil`, no per-weapon `equipTime` (a single global
+> 0.25 s switch time was used), no `reserveAmmo` cap per weapon, and no `utility`
+> category. All added.
+
+### 12.1 Weapon table [PROV]
+
+Common rarity. Every value here is provisional and expected to be retuned.
+
+| Weapon | Category | Damage | RPS | Mag | Reserve | Reload | Equip | Headshot | Ammo |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Assault Rifle | assaultRifle | 30 | 5.5 | 30 | 210 | 2.3 s | 0.55 s | ×2.0 | medium |
+| SMG | smg | 17 | 11.0 | 30 | 240 | 2.1 s | 0.45 s | ×2.0 | light |
+| Pump Shotgun | shotgun | 9 ×10 pellets | 0.75 | 5 | 60 | 4.5 s | 0.85 s | ×1.5 | shells |
+| Tactical Shotgun | shotgun | 6 ×10 pellets | 1.6 | 8 | 60 | 3.6 s | 0.70 s | ×1.5 | shells |
+| Bolt Sniper | sniper | 105 | 0.55 | 1 | 20 | 2.8 s | 1.05 s | ×2.5 | heavy |
+| Pistol | pistol | 24 | 6.75 | 16 | 180 | 1.5 s | 0.40 s | ×2.0 | light |
+| Rocket Launcher | utility | 100 direct / 75 splash | 0.6 | 1 | 12 | 3.2 s | 1.10 s | — | rockets |
+
+Ammo types: light, medium, heavy, shells, rockets.
+
+### 12.2 Weapon firing [OWNER]
+
+Fire must feel **immediate**. On trigger, all of these happen **instantly**: fire event,
+muzzle event, hit registration, damage feedback. **No delayed feedback chain.**
+
+Firing resolves in the same tick as the input. Feedback is never deferred to a later tick
+or gated behind an animation.
+
+### 12.3 Recoil [OWNER]
+
+Per-weapon recoil. Distinct from spread: recoil moves the **aim point**, spread randomises
+**within** it.
+
+| Parameter | Meaning | Marker |
 | --- | --- | --- |
-| Enter edit | Hold or press `G` while aiming at an own piece within 8 m | 0.10 s |
-| Select tiles | Drag with fire held, or click tiles | — |
-| Confirm | Release fire / press `G` | 0.10 s |
-| Reset | Press `R` while editing | instant |
-| Cancel | Press the build key or move out of range | instant |
+| `recoilVertical` | degrees of upward kick per shot | [PROV] |
+| `recoilHorizontal` | degrees of random lateral kick per shot | [PROV] |
+| `recoilRecovery` | degrees/second returning to the original aim | [PROV] |
 
-Total floor-to-confirmed-edit time for a practised player must be under 0.25 s. Nothing in
-the edit flow may block movement — the player runs and jumps normally throughout.
+### 12.4 Spread [PROV]
 
-Editing is allowed only on pieces the player owns (`ownerId === localPlayerId`). Enemy
-pieces cannot be edited in v0.1.
+Base spread, growing with sustained fire and movement, decaying after a delay. ADS reduces
+spread; crouching reduces it further.
 
-### 7.3 Wall patterns
+### 12.5 Shotguns [OWNER]
 
-| Name | Selected tiles | Result |
+Shotguns use **pellet-based spread**. Each pellet must **resolve independently**,
+contribute damage correctly, and **support headshot detection**. Total damage may be capped
+if balance requires.
+
+**Do not fake shotgun damage as one simple ray if pellet behaviour is intended.**
+
+> **Change from baseline:** the baseline multiplied damage by pellet count in a single
+> calculation, with one hit region for the whole shot. Rewritten so each pellet is traced
+> and resolved on its own, meaning a shot can land 6 body pellets and 2 head pellets and
+> score correctly.
+
+Pellet directions come from a deterministic pattern jittered by the seeded `spread` stream,
+so patterns are learnable rather than pure noise.
+
+### 12.6 Headshots [OWNER]
+
+Detected **reliably**. Per-weapon multipliers. **Visually distinct feedback.**
+
+## 13. Damage system [OWNER]
+
+**100 HEALTH, 100 SHIELD.**
+
+Default damage order: **shield first, then health**, unless an explicit damage type
+overrides it. Overflow carries into health within the same hit.
+
+**Damage must update the HUD immediately.**
+
+### 13.1 Damage feedback [OWNER]
+
+On a successful hit, all appear **immediately**: hitmarker, damage number, health/shield
+reaction, optional impact effect, optional sound. Headshots get **distinct** feedback.
+
+### 13.2 Eliminations [OWNER]
+
+At zero health, immediately: elimination triggers, elimination counter updates, kill feed
+updates, **loot drops**, target becomes inactive/removed, optional elimination effect.
+
+**Optional siphon system:** when enabled, restore configured health/shield immediately.
+Default off [PROV].
+
+## 14. Pickaxe [OWNER]
+
+A functional pickaxe is required: equip, swing, structure hit, prop hit, damage, harvesting
+where applicable, impact feedback, swing sound, impact sound.
+
+> The baseline had harvest *values* in config but **no pickaxe implementation** — no swing,
+> no hit resolution, no equip. Built from scratch.
+
+| Parameter | Value | Marker |
 | --- | --- | --- |
-| Full wall | — (reset) | Solid wall |
-| Door | 6, 7 | Ground-level doorway, 1 tile wide |
-| Window | 4 | Centre window |
-| Half wall (bottom) | 0,1,2,3,4,5 | Lower third remains |
-| Corner (left) | 2, 5, 8 | Right column removed |
-| Corner (right) | 0, 3, 6 | Left column removed |
-| Doorway wide | 6,7,8 | Full-width bottom opening |
-| Peek left | 3 | Single left mid-tile removed |
-| Peek right | 5 | Single right mid-tile removed |
+| Swing interval | 0.55 s | [PROV] |
+| Range | 3.0 m | [PROV] |
+| Damage to structures | 100 enemy / 0 own | [PROV] |
+| Damage to players | 20 | [PROV] |
+| Harvest per swing | 12 wood / 14 brick / 12 metal | [PROV] |
 
-### 7.4 Floor patterns
+The pickaxe occupies its own slot, separate from the five combat slots (§15).
 
-| Name | Selected tiles | Result |
-| --- | --- | --- |
-| Full floor | — | Solid floor |
-| Quarter hole | 0 (or 2, 6, 8) | One-quarter drop-through |
-| Half floor | 0,1,3,4 | Half the floor removed |
-| Centre hole | 4 | Centre drop-through |
-| Full drop | 0–8 | Floor removed entirely (piece is deleted) |
+## 15. Inventory [OWNER]
 
-### 7.5 Ramp patterns
+**Five-slot combat inventory.**
 
-| Name | Selected tiles | Result |
-| --- | --- | --- |
-| Full ramp | — | Standard ramp |
-| Half ramp (left) | 0,3,6 | Left half only |
-| Half ramp (right) | 2,5,8 | Right half only |
-| Ramp with platform | 6,7,8 | Flat landing at the top |
-| Inverted step | 0,1,2 | Upper row removed |
+> **Change from baseline:** the baseline used six slots with slot 0 permanently holding the
+> tool. The spec specifies five combat slots and binds `pickaxe` as an action distinct from
+> `weaponSlot1`–`weaponSlot5`. Restructured: **5 combat slots + a separate pickaxe slot**.
 
-### 7.6 Cone patterns
+The player must be able to: pick up items, drop items, swap items, **reorder slots**, equip
+by number key, **switch by mouse wheel**, see rarity, see ammo, see the current item, and
+replace occupied slots when appropriate.
 
-| Name | Selected tiles | Result |
-| --- | --- | --- |
-| Full cone | — | Standard pyramid |
-| Half cone | 0,1,2 | One face removed |
-| Quarter cone | 0,1,2,3 | Two faces removed |
+**Inventory operations must never randomly delete items.** Every operation is total: an
+item leaving a slot is either placed in another slot or dropped into the world as a
+pickup. Asserted by test.
 
-### 7.7 Edit rules
+## 16. Loot [OWNER]
 
-1. Editing never changes a piece's HP, material, or owner.
-2. Editing does not refund or cost material.
-3. A "full drop" floor edit and any edit that removes every tile deletes the piece and
-   triggers support re-evaluation (§6.5).
-4. Placing a new piece into an edited piece's slot is blocked — the slot is still occupied.
-5. An edited piece reverts to its full form when the editing player edits it again with a
-   reset, at no cost.
+**World loot must exist physically in the world.** Items have a world position, are
+interactable, display rarity readably, enter inventory on pickup, and are droppable.
 
-## 8. Loot
+Optional polish: subtle rotation, hover, glow by rarity.
 
-### 8.1 Sources
+> The baseline generated loot *tables* but had **no world loot entities** — no position, no
+> interaction, no pickup. Built from scratch.
 
-| Source | Items | Notes |
-| --- | --- | --- |
-| Floor loot | 1 weapon or 1 consumable + ammo | Scattered per `MAP_SPEC §6.2` |
-| Chest | 2 items + 2 ammo stacks + 1 consumable | Audible hum within 12 m |
-| Ammo box | 2 ammo stacks | — |
-| Player drop | Everything the player held | Materials drop as a single stack, capped at 500 |
+### 16.1 Chests [OWNER]
 
-### 8.2 Rarity weights
+3D chest object, interact prompt, opening state, opening sound, loot spawn, ammo,
+materials, healing chance, rarity-weighted weapon chance.
 
-| Source | Common | Uncommon | Rare | Epic | Legendary |
-| --- | --- | --- | --- | --- | --- |
-| Floor loot | 45 % | 32 % | 16 % | 5.5 % | 1.5 % |
-| Chest | 18 % | 34 % | 30 % | 14 % | 4 % |
+**Loot appears in the world. Chest contents are NOT injected directly into inventory.**
 
-Weapon class within a roll is selected by the class weights in `MAP_SPEC §6.3`, which vary
-by POI tier.
+### 16.2 Ammo boxes [OWNER]
 
-### 8.3 Guarantees
+Interactable, open, spawn ammo pickups, play audio, enter an opened state.
 
-- A chest never rolls two weapons of the same class.
-- The first chest a player opens in a match is guaranteed to contain at least one weapon.
-- Ammo dropped alongside a weapon always matches that weapon's ammo type.
+### 16.3 Rarity [OWNER]
 
-## 9. Match flow
+**COMMON, UNCOMMON, RARE, EPIC, LEGENDARY.**
 
-| Phase | Duration | Behaviour |
-| --- | --- | --- |
-| Warmup | Until start | Free movement, no damage, no building |
-| Drop | 45 s | Players glide in from the drop path (`MAP_SPEC §7`) |
-| Storm phases | 8 phases, see below | Playable circle shrinks |
-| End | — | Last player standing |
+Rarity may influence damage, reload, spread, magazine size or other tuning.
+**Do not overcomplicate balance before the systems are stable** — rarity affects damage
+only for now [PROV].
 
-| Phase | Wait | Shrink | Radius after | Storm DPS |
+### 16.4 Consumables [OWNER]
+
+At minimum: **small shield, large shield, medkit or equivalent health item.**
+
+Consumables occupy inventory, require use time where designed, apply correct health/shield
+limits, and are interruptible where appropriate.
+
+| Item | Use time | Effect | Cap | Marker |
 | --- | --- | --- | --- | --- |
-| 1 | 180 s | 120 s | 60 % | 1 |
-| 2 | 120 s | 100 s | 45 % | 1 |
-| 3 | 100 s | 90 s | 33 % | 2 |
-| 4 | 90 s | 80 s | 24 % | 3 |
-| 5 | 75 s | 70 s | 17 % | 5 |
-| 6 | 60 s | 60 s | 11 % | 7 |
-| 7 | 45 s | 45 s | 6 % | 10 |
-| 8 | 30 s | 60 s | 0 % | 10 |
+| Small Shield | 2.0 s | +25 shield | 50 | [PROV] |
+| Large Shield | 5.0 s | +50 shield | 100 | [PROV] |
+| Medkit | 8.0 s | health to full | 100 | [PROV] |
 
-Radii are a fraction of the initial safe-zone radius (`MAP_SPEC §3.2`). The storm damages
-on a 1 s tick and ignores shield. Each circle's centre is chosen inside the previous
-circle with the match RNG (§11.1).
+## 17. Bots / test targets [OWNER]
 
-## 10. UI / HUD
+Lightweight bots supporting movement, jumping, shooting, taking damage, dying and dropping
+loot. **Complex AI is not a priority.** Simple, performant logic.
 
-Full layout references live in `references/ui/`.
+## 18. HUD [OWNER]
 
-| Element | Position | Contents |
-| --- | --- | --- |
-| Health / shield bars | Bottom-centre | Shield above health, numeric values inline |
-| Material counters | Bottom-right, above the build bar | Wood / Stone / Metal with icons |
-| Build bar | Bottom-right | 4 piece slots + material selector, active slot highlighted |
-| Inventory bar | Bottom-right | 6 slots, rarity-coloured borders, ammo count per slot |
-| Crosshair | Centre | Dynamic — opens with spread (§5.5); build mode shows a dot + ghost |
-| Edit overlay | On the target piece | 3×3 grid, selected tiles highlighted, world-space |
-| Minimap | Top-right | North-up, storm circle, player arrow |
-| Damage numbers | At the hit point | White = health, blue = shield, yellow = headshot |
-| Hit marker | Centre | X on hit, sound-matched; thicker on elimination |
-| Storm timer | Top-centre | Phase, countdown, "X players left" |
-| Kill feed | Top-left | Last 5 eliminations |
+Required: health, shield, ammo, inventory slots, materials, selected build piece, selected
+material, minimap, **compass**, **player count**, **elimination count**, kill feed,
+**interaction prompts**, **edit state indicators**.
 
-Rules: the HUD never occludes the centre 40 % of the screen. All HUD colours meet a 4.5:1
-contrast ratio against both the day and night sky palettes (`MAP_SPEC §5`).
+**The HUD must look like game UI, not generic website UI.**
 
-## 11. Technical constraints
+> Missing from baseline: compass, player count, elimination count, interaction prompts,
+> edit state indicators.
 
-### 11.1 Determinism and RNG
+### 18.1 HUD responsiveness [OWNER]
 
-All gameplay randomness comes from seeded streams derived from the match seed:
-`loot`, `storm`, `spread`, `cosmetic`. `Math.random()` is banned outside `cosmetic`.
-Streams are xorshift128+ and are advanced only by gameplay code, never by rendering.
+Updates happen **immediately** on state change: health, shield, ammo, weapon swap, material
+use, elimination, inventory reorder, build piece selection. Event-driven, never polled on a
+delay.
 
-### 11.2 Performance budget (per frame, 1080p, mid-range GPU)
+## 19. Settings [OWNER]
 
-| Budget | Target |
+**Video:** resolution, fullscreen, graphics quality, shadows, effects, render distance, FPS
+limit, FOV.
+**Input:** mouse sensitivity, ADS sensitivity, scope sensitivity, invert Y.
+**Gameplay:** sprint settings, **confirm edit on release**, **reset edit bind**, build
+immediately.
+**Audio:** master, music, SFX, environment/dialogue.
+**HUD:** HUD scale, crosshair, minimap toggle, damage numbers.
+
+> No settings system exists in the baseline. Built from scratch.
+
+## 20. Keybind customisation [OWNER]
+
+All important gameplay actions rebindable. Mouse buttons and **mouse wheel** are valid
+binds. **Conflicts are detected and handled clearly.**
+
+## 21. Audio [OWNER]
+
+Original or royalty-free/generated audio only.
+
+Required categories: weapon fire, reload, empty weapon, hitmarker, headshot, elimination,
+pickaxe swing, pickaxe impact, footsteps, jump, landing, building placement, editing, reset
+edit, chest, ammo box, pickup, UI navigation, storm if implemented, victory if implemented.
+
+Audio must be crisp and not excessively loud.
+
+**Footsteps:** surface-based types where feasible (grass, wood, metal, stone, water).
+Lower priority than core movement.
+
+## 22. Small test environment first [OWNER]
+
+**Do NOT prioritise the full island yet.**
+
+A compact, polished test environment supporting: building tests, edit tests, weapon tests,
+movement tests, elevation tests, simple interior spaces, open field, ramp/floor/wall
+chains, basic loot, one or two bots.
+
+This environment exists for **gameplay validation**.
+
+## 23. Performance [OWNER]
+
+**Stable 60 FPS minimum.** Higher preferred.
+
+When performance degrades, reduce: distant terrain, decorative props, particles, shadow
+quality, excessive foliage, draw calls, expensive post-processing.
+
+**Never reduce:** input polling, building responsiveness, edit responsiveness, collision
+correctness, hit feedback.
+
+## 24. Quality assurance [OWNER]
+
+Every major system has tests. Required validation:
+
+**Movement** — rapid WASD changes, jump, sprint, crouch, jump-turn, slope traversal,
+step-up, collision stability.
+**Camera** — wall collision, terrain collision, crouch adjustment, ADS alignment,
+crosshair/weapon-ray alignment.
+**Building** — rapid walls, rapid floors, rapid ramps, rapid cones, wall-floor-ramp, 90s,
+tunnelling, **no dropped placement**.
+**Editing** — wall window, door, corner edit, three-tile opening, floor half edit, cone
+edit, ramp flip, reset edit, double edit, triple edit, edit distance cancellation.
+**Collision** — walk through edited openings, edited ramp traversal, reset collision,
+destroyed build collision removal, **no stale collider after edit**.
+**Combat** — bodyshot, headshot, shotgun pellets, reload, weapon swap, empty magazine,
+damage number, elimination.
+**Inventory** — pickup, drop, replace, reorder, equip, chest loot, ammo pickup.
+
+## 25. No false "done" [OWNER]
+
+A feature is **not** complete because code compiles, tests compile, UI exists, or
+placeholder logic exists.
+
+A feature is complete only when: **it works**, **tests pass**, **no obvious edge-case bug
+remains**, and **it integrates with related systems**.
+
+## 26. Bug fixing rule [OWNER]
+
+If a core system is wrong, **refactor it**.
+
+- Build pieces misalign → fix grid maths.
+- Edit collision wrong → rebuild collision geometry.
+- Camera aim wrong → fix ray architecture.
+- Rapid inputs drop → fix input processing.
+
+**Do not accumulate hacks.**
+
+## 27. Implementation order [OWNER]
+
+| Phase | Work |
 | --- | --- |
-| Frame time | 16.6 ms (60 fps), 8.3 ms on high-end |
-| Simulation | ≤ 4 ms |
-| Draw calls | ≤ 1200 |
-| Build pieces rendered | ≤ 6000 (instanced per material × piece type) |
-| Triangles | ≤ 2.5 M |
+| 1 | Input + movement |
+| 2 | Camera |
+| 3 | Building placement |
+| 4 | Editing |
+| 5 | Edited collision |
+| 6 | Combat |
+| 7 | Inventory / loot |
+| 8 | HUD |
+| 9 | Settings / keybinds |
+| 10 | Audio |
+| 11 | Bots / simple match loop |
+| 12 | Small polished test environment |
+| 13 | Performance pass |
+| 14 | **Only then** expand world / map |
 
-Build pieces are instanced. One `InstancedMesh` per `(pieceType, material, editPattern)`
-combination, rebuilt incrementally, never per-frame from scratch.
+## 28. Final standard [OWNER]
 
-### 11.3 Input
+These must feel excellent: movement, camera, building, editing, edit reset, edited
+collision, combat, weapon switching, damage feedback.
 
-Rebindable. Defaults:
+**Acceptance gates — if any fail, core gameplay is not finished:**
 
-| Action | Key |
-| --- | --- |
-| Move | `W` `A` `S` `D` |
-| Jump | `Space` |
-| Sprint | `Shift` |
-| Crouch | `Ctrl` |
-| Fire | `Mouse1` |
-| ADS | `Mouse2` |
-| Reload | `R` |
-| Harvest tool | `1` |
-| Weapon slots | `2`–`6` |
-| Wall / Floor / Ramp / Cone | `F1` / `F2` / `F3` / `F4` |
-| Toggle build | `Q` |
-| Material cycle | `F5` / mouse wheel |
-| Edit | `G` |
-| Rotate piece | `R` (in build mode) |
-| Interact | `E` |
-| Map | `M` |
+1. A fast 90 works repeatedly.
+2. A double edit works repeatedly.
+3. A triple edit works repeatedly.
+4. A three-tile wall opening lets the player through.
+5. A flipped stair does not retain its old collision.
+6. Rapid building does not drop inputs.
+7. Crosshair and shot direction agree.
 
-Mouse input is read from raw deltas (Pointer Lock), never from smoothed values.
+Each is a named test in the suite.
 
-## 12. Out of scope for v0.1
+---
 
-Recorded here so they are not implemented by accident: teams and squads, revives,
-vehicles, emotes, cosmetics, matchmaking, dedicated-server netcode, voice, progression,
-battle pass, replays, creative mode, mobile input.
+## 46. Provisional values needing owner sign-off
+
+The owner's specification is behavioural; these numbers were not supplied and are carried
+or derived. Listed highest-impact first.
+
+| # | Value | Current | Why it matters |
+| --- | --- | --- | --- |
+| 1 | Build tile size / wall height | 5.12 m / 3.84 m | Propagates into grid, targeting, geometry, edit tile sizes and collision boxes |
+| 2 | Simulation tick rate | 60 Hz (raised from 30) | Input latency; priority 1 |
+| 3 | Camera distance / shoulder offset | 2.6 m / 0.45 m | "Close", "not too far", edit precision |
+| 4 | Movement speeds and acceleration | 4.6 / 7.6 / 2.4 m/s, 85 m/s² | Whole feel of the game |
+| 5 | Weapon damage / fire rate table | §12.1 | All combat balance |
+| 6 | Placement cooldown and queue depth | 0.05 s, 3 | "No dropped inputs" |
+| 7 | Edit range | 8.0 m | Edit reachability |
+| 8 | Material HP and build times | §9.4 | Build fight pacing |
+| 9 | Recoil values | §12.3 | Not specified at all |
+| 10 | Consumable use times | §16.4 | Heal pacing |
 
 ---
 
@@ -597,4 +881,5 @@ battle pass, replays, creative mode, mobile input.
 
 | Version | Date | Change |
 | --- | --- | --- |
-| 0.1.0 | 2026-09-13 | Initial baseline. Placeholder pending the owner's authoritative spec. |
+| 1.0.0 | 2026-09-13 | Replaced the placeholder baseline with the owner's authoritative specification. Key corrections: per-type edit grids (floor 2×2, cone 2×2, ramp 3×2), edited collision as a first-class system, five-slot inventory with a separate pickaxe, BRICK replacing stone, shared camera aim ray, placement queue replacing input-dropping rate limits, per-pellet shotgun resolution, recoil and equip time, world loot entities, settings, audio, bots. |
+| 0.1.0 | 2026-09-13 | Initial baseline placeholder. Void. |
