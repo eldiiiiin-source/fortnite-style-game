@@ -1,0 +1,30 @@
+{
+  "$comment": "Map manifest, read by src/world/MapLoader.js. MAP_SPEC §10 step 3. Values mirror MAP_SPEC §2, §3 and §5.3; heightmap and splatMap are null until authored art exists, in which case TerrainGenerator produces the island procedurally (§10 step 4).",
+  "name": "Cinder Isle",
+  "specVersion": "0.1.0",
+  "seed": 1337,
+  "heightmap": null,
+  "splatMap": null,
+  "dimensions": {
+    "playableExtent": 2048,
+    "worldExtent": 2560,
+    "heightmapResolution": 1025,
+    "seaLevel": 0,
+    "minHeight": -8,
+    "maxHeight": 190,
+    "buildCeilingY": 260,
+    "killFloorY": -40
+  },
+  "safeZone": {
+    "initialRadius": 980,
+    "initialCentreJitter": 180
+  },
+  "streaming": {
+    "chunkSize": 128,
+    "lodDistances": [200, 450, 800],
+    "propLoadRadius": 500,
+    "propUnloadRadius": 650
+  },
+  "poiFiles": [],
+  "$poiFilesNote": "Authored POI layouts go here as 'poi/<name>.json' (MAP_SPEC §10 step 2). While this list is empty, POIs are synthesised from the §5.3 table in src/world/PointsOfInterest.js."
+}
