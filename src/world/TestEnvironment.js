@@ -113,6 +113,55 @@ export class TestEnvironment {
     return { heights, resolution, size, origin: [originX, originZ] };
   }
 
+  /**
+   * Fixed layout for the validation region (§22). Deliberately sparse: MAP_SPEC §7 makes
+   * open space intentional, and a cluttered test region would hide movement bugs rather
+   * than expose them.
+   *
+   * Everything is placed in build-module multiples so structures line up with the grid.
+   */
+  layout() {
+    const t = (n) => TILE * n;
+    return {
+      // Chests sit at each feature, so loot routes cross the whole region.
+      chests: [
+        { x: 0, z: t(-4) },
+        { x: t(19), z: t(13) },       // hilltop
+        { x: t(-17), z: t(9) },       // slope
+        { x: t(-6), z: t(-17) },      // basin
+        { x: t(8), z: t(-9) }         // by the steps
+      ],
+      ammoBoxes: [
+        { x: t(3), z: t(3) },
+        { x: t(-10), z: t(-4) },
+        { x: t(14), z: t(6) }
+      ],
+      floorLoot: [
+        { x: t(-2), z: t(2) },
+        { x: t(6), z: t(-2) },
+        { x: t(-13), z: t(5) },
+        { x: t(17), z: t(10) }
+      ],
+      /** Harvestable props (§14). Kind maps to PICKAXE.harvestPerSwing. */
+      props: [
+        { kind: 'tree', material: 'wood', x: t(-4), z: t(6), total: 50 },
+        { kind: 'tree', material: 'wood', x: t(-6), z: t(7), total: 50 },
+        { kind: 'tree', material: 'wood', x: t(-5), z: t(9), total: 50 },
+        { kind: 'rock', material: 'brick', x: t(9), z: t(4), total: 60 },
+        { kind: 'rock', material: 'brick', x: t(11), z: t(6), total: 60 },
+        { kind: 'vehicle', material: 'metal', x: t(2), z: t(-6), total: 70 },
+        { kind: 'container', material: 'metal', x: t(4), z: t(-7), total: 90 }
+      ],
+      /** One or two bots, per §22. */
+      botSpawns: [
+        { x: t(10), z: t(2) },
+        { x: t(-9), z: t(-6) }
+      ],
+      /** A simple interior: four walls and a roof opening, for indoor combat tests. */
+      shelter: { centre: { x: t(-14), z: t(-12) }, size: 2 }
+    };
+  }
+
   /** Clamp a position into the region. */
   clampToBounds(x, z) {
     const e = TEST_REGION.halfExtent;

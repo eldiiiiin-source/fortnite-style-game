@@ -1,23 +1,43 @@
 /**
- * Renderer.js — the three.js view layer. MASTER_SPEC §11.2, MAP_SPEC §8, §9.
+ * Renderer.js — the three.js view layer. MASTER_SPEC §23, MAP_SPEC §10, §16.
  *
- * This is the ONLY module in src/ that owns three.js scene objects for the world. The
- * simulation never reads from here (CLAUDE.md: rendering stays out of simulation).
+ * The ONLY module owning three.js scene objects for the world. Simulation never reads
+ * from here.
+ *
+ * Build pieces are drawn from PieceGeometry — the same module the collision world uses —
+ * so an edited opening is visibly open AND passable, and the two cannot drift apart
+ * (§9.2, §10.4). Wall and floor tiles are instanced unit cubes scaled per tile, which
+ * means any edit pattern renders without a new mesh type.
  */
 import * as THREE from 'three';
-import { WORLD, BUDGET, MATERIALS, BUILD, PIECE_TYPES, MATERIAL_ORDER } from '../core/Config.js';
+import {
+  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA
+} from '../core/Config.js';
+import { solidBoxes, rampSections, coneQuadrants, cellOrigin } from '../building/PieceGeometry.js';
 
-const MAX_INSTANCES = BUDGET.maxBuildPieces;
+/** MAP_SPEC §10 palette — bright, clean, stylised. */
+const PALETTE = Object.freeze({
+  sky: 0x8fc4e8,
+  grass: 0x6faa4a,
+  rock: 0x9a9a94,
+  water: 0x3fb9c9,
+  sun: 0xfff6e6,
+  ambientSky: 0xbdd7f5,
+  ambientGround: 0x5a6b45
+});
 
 export class Renderer {
   constructor(container, terrain) {
     this.terrain = terrain;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x8fb6d9);
-    this.scene.fog = new THREE.FogExp2(0x8fb6d9, 0.0018); // MAP_SPEC §8
+    this.scene.background = new THREE.Color(PALETTE.sky);
+    // MAP_SPEC §10 — a clear pleasant afternoon, not heavy fog.
+    this.scene.fog = new THREE.Fog(PALETTE.sky, WORLD.propLoadRadius * 0.6, WORLD.terrainDrawDistance);
 
-    this.camera = new THREE.PerspectiveCamera(80, 1, 0.1, WORLD.terrainDrawDistance);
+    this.camera = new THREE.PerspectiveCamera(
+      CAMERA.fovDefault, 1, 0.1, WORLD.terrainDrawDistance
+    );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -27,9 +47,11 @@ export class Renderer {
 
     this._setupLighting();
     this._setupTerrain();
-    this._setupBuildInstances();
+    this._setupBuildMeshes();
     this._setupGhost();
+    this._setupEditOverlay();
 
+    this.lastGridRevision = -1;
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
   }
@@ -38,44 +60,37 @@ export class Renderer {
     return this.renderer.domElement;
   }
 
+  /** MAP_SPEC §10 — soft sunlight, readable shadows, clear silhouettes. */
   _setupLighting() {
-    // MAP_SPEC §8 — Noon preset: sun elevation 68 degrees, 4 shadow cascades approximated
-    // by one directional light with a wide ortho frustum.
-    const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
-    const elevation = 68 * Math.PI / 180;
-    sun.position.set(Math.cos(elevation) * 300, Math.sin(elevation) * 300, 120);
+    const sun = new THREE.DirectionalLight(PALETTE.sun, 2.1);
+    const elevation = 55 * Math.PI / 180;
+    sun.position.set(Math.cos(elevation) * 200, Math.sin(elevation) * 200, 90);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    const d = 220; // MAP_SPEC §8 — shadow max distance
-    Object.assign(sun.shadow.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 900 });
+    const d = TILE * 44;
+    Object.assign(sun.shadow.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 800 });
     this.scene.add(sun);
+    this.scene.add(sun.target);
     this.sun = sun;
 
-    this.scene.add(new THREE.HemisphereLight(0xbdd7f5, 0x4a5340, 0.7));
+    this.scene.add(new THREE.HemisphereLight(PALETTE.ambientSky, PALETTE.ambientGround, 0.75));
   }
 
-  /**
-   * Build visible terrain chunks around the origin. MAP_SPEC §9 — chunked, LOD'd.
-   * Only chunks within propLoadRadius of the player are meshed.
-   */
   _setupTerrain() {
     this.terrainGroup = new THREE.Group();
     this.scene.add(this.terrainGroup);
     this.chunkMeshes = new Map();
+    this.terrainMaterial = new THREE.MeshLambertMaterial({ color: PALETTE.grass });
 
-    this.terrainMaterial = new THREE.MeshLambertMaterial({ color: 0x6f8f52 });
-
-    // Ocean plane at sea level.
-    const ocean = new THREE.Mesh(
-      new THREE.PlaneGeometry(WORLD.worldExtent, WORLD.worldExtent),
-      new THREE.MeshLambertMaterial({ color: 0x2e5f82, transparent: true, opacity: 0.85 })
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD.regionExtent * 3, WORLD.regionExtent * 3),
+      new THREE.MeshLambertMaterial({ color: PALETTE.water, transparent: true, opacity: 0.82 })
     );
-    ocean.rotation.x = -Math.PI / 2;
-    ocean.position.y = WORLD.seaLevel;
-    this.scene.add(ocean);
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = WORLD.seaLevel - 0.05;
+    this.scene.add(water);
   }
 
-  /** Mesh one terrain chunk at a given LOD. MAP_SPEC §9 */
   _buildChunk(cx, cz, resolution = 33) {
     const key = `${cx},${cz}`;
     if (this.chunkMeshes.has(key)) return;
@@ -101,7 +116,7 @@ export class Renderer {
     this.chunkMeshes.set(key, mesh);
   }
 
-  /** Stream chunks around a world position. MAP_SPEC §9 */
+  /** Chunk streaming with hysteresis so chunks do not thrash at the boundary (§16). */
   updateStreaming(position) {
     const size = WORLD.chunkSize;
     const load = Math.ceil(WORLD.propLoadRadius / size);
@@ -115,11 +130,9 @@ export class Renderer {
       }
     }
 
-    // Unload beyond the unload radius (hysteresis, so chunks do not thrash at the edge).
     for (const [key, mesh] of this.chunkMeshes) {
       const [cx, cz] = key.split(',').map(Number);
-      const dist = Math.hypot((cx - pcx) * size, (cz - pcz) * size);
-      if (dist > WORLD.propUnloadRadius) {
+      if (Math.hypot((cx - pcx) * size, (cz - pcz) * size) > WORLD.propUnloadRadius) {
         this.terrainGroup.remove(mesh);
         mesh.geometry.dispose();
         this.chunkMeshes.delete(key);
@@ -128,144 +141,239 @@ export class Renderer {
   }
 
   /**
-   * One InstancedMesh per (pieceType, material). MASTER_SPEC §11.2.
-   * Edit patterns are handled by swapping the instance's geometry group in a later pass;
-   * v0.1 renders every piece in its full form and hides edited tiles with a decal.
+   * One InstancedMesh of UNIT CUBES per material. Each wall/floor edit tile becomes one
+   * instance, scaled and positioned from PieceGeometry. Any edit pattern therefore
+   * renders with no new mesh type and no per-pattern geometry.
    */
-  _setupBuildInstances() {
+  _setupBuildMeshes() {
     this.buildGroup = new THREE.Group();
     this.scene.add(this.buildGroup);
-    this.instanced = new Map();
 
-    const geometries = {
-      wall: new THREE.BoxGeometry(BUILD.tileSize, BUILD.wallHeight, BUILD.thickness),
-      floor: new THREE.BoxGeometry(BUILD.tileSize, BUILD.thickness, BUILD.tileSize),
-      ramp: this._rampGeometry(),
-      cone: this._coneGeometry()
-    };
+    const unitCube = new THREE.BoxGeometry(1, 1, 1);
+    this.tileMeshes = new Map();
+    this.surfaceMeshes = new Map();
 
-    for (const type of PIECE_TYPES) {
-      for (const mat of MATERIAL_ORDER) {
-        const material = new THREE.MeshLambertMaterial({ color: MATERIALS[mat].color });
-        const perCombo = Math.floor(MAX_INSTANCES / (PIECE_TYPES.length * MATERIAL_ORDER.length));
-        const mesh = new THREE.InstancedMesh(geometries[type], material, perCombo);
-        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        mesh.count = 0;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        this.buildGroup.add(mesh);
-        this.instanced.set(`${type}:${mat}`, mesh);
-      }
+    const perMaterial = Math.floor(BUDGET.maxBuildPieces * 9 / MATERIAL_ORDER.length);
+
+    for (const mat of MATERIAL_ORDER) {
+      const material = new THREE.MeshLambertMaterial({ color: MATERIALS[mat].color });
+
+      const instanced = new THREE.InstancedMesh(unitCube, material, perMaterial);
+      instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      instanced.count = 0;
+      instanced.castShadow = true;
+      instanced.receiveShadow = true;
+      instanced.frustumCulled = false;
+      this.buildGroup.add(instanced);
+      this.tileMeshes.set(mat, instanced);
+
+      // Ramps and cones are sloped surfaces; they get a rebuilt merged mesh per material.
+      const surface = new THREE.Mesh(new THREE.BufferGeometry(), material);
+      surface.castShadow = true;
+      surface.receiveShadow = true;
+      surface.frustumCulled = false;
+      this.buildGroup.add(surface);
+      this.surfaceMeshes.set(mat, surface);
     }
   }
 
-  /** Ramp: 3.84 m rise over 5.12 m run. references/building/01-piece-geometry.md */
-  _rampGeometry() {
-    const T = BUILD.tileSize, H = BUILD.wallHeight;
-    const geo = new THREE.BufferGeometry();
-    const v = new Float32Array([
-      // Sloped top surface (two triangles)
-      -T / 2, 0, T / 2, T / 2, 0, T / 2, T / 2, H, -T / 2,
-      -T / 2, 0, T / 2, T / 2, H, -T / 2, -T / 2, H, -T / 2,
-      // Back face
-      -T / 2, 0, -T / 2, T / 2, 0, -T / 2, T / 2, H, -T / 2,
-      -T / 2, 0, -T / 2, T / 2, H, -T / 2, -T / 2, H, -T / 2,
-      // Left side
-      -T / 2, 0, T / 2, -T / 2, H, -T / 2, -T / 2, 0, -T / 2,
-      // Right side
-      T / 2, 0, T / 2, T / 2, 0, -T / 2, T / 2, H, -T / 2
-    ]);
-    geo.setAttribute('position', new THREE.BufferAttribute(v, 3));
-    geo.computeVertexNormals();
-    geo.translate(0, 0, 0);
-    return geo;
-  }
-
-  /** Cone: pyramid with apex at the cell centre top. */
-  _coneGeometry() {
-    const T = BUILD.tileSize, H = BUILD.wallHeight;
-    const geo = new THREE.ConeGeometry(T / Math.SQRT2, H, 4);
-    geo.rotateY(Math.PI / 4);
-    geo.translate(0, H / 2, 0);
-    return geo;
-  }
-
-  /** Rebuild instance transforms from the build grid. Called when the grid changes. */
+  /**
+   * Rebuild build-piece visuals from the grid. Driven by `grid.revision`, so this runs
+   * only when something actually changed — never per frame.
+   */
   syncBuildGrid(grid) {
-    const counts = new Map();
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler();
-    const one = new THREE.Vector3(1, 1, 1);
-    const p = new THREE.Vector3();
+    if (grid.revision === this.lastGridRevision) return;
+    this.lastGridRevision = grid.revision;
 
-    for (const mesh of this.instanced.values()) mesh.count = 0;
+    const counts = new Map(MATERIAL_ORDER.map((m) => [m, 0]));
+    const surfaceVerts = new Map(MATERIAL_ORDER.map((m) => [m, []]));
+
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
 
     for (const piece of grid) {
       if (piece.destroyed) continue;
-      const key = `${piece.type}:${piece.material}`;
-      const mesh = this.instanced.get(key);
-      if (!mesh) continue;
+      const mat = piece.material;
 
-      const idx = counts.get(key) ?? 0;
-      if (idx >= mesh.instanceMatrix.count) continue; // over budget, skip
+      // Wall and floor: one instanced cube per remaining edit tile.
+      for (const box of solidBoxes(piece)) {
+        const mesh = this.tileMeshes.get(mat);
+        const index = counts.get(mat);
+        if (!mesh || index >= mesh.instanceMatrix.count) continue;
 
-      const c = piece.worldCentre;
-      let yaw = 0;
-      switch (piece.direction) {
-        case 'east': yaw = Math.PI / 2; break;
-        case 'south': yaw = Math.PI; break;
-        case 'west': yaw = -Math.PI / 2; break;
-        default: yaw = 0;
+        scale.set(
+          Math.max(box.max[0] - box.min[0], 1e-4),
+          Math.max(box.max[1] - box.min[1], 1e-4),
+          Math.max(box.max[2] - box.min[2], 1e-4)
+        );
+        position.set(
+          (box.min[0] + box.max[0]) / 2,
+          (box.min[1] + box.max[1]) / 2,
+          (box.min[2] + box.max[2]) / 2
+        );
+        matrix.compose(position, quaternion, scale);
+        mesh.setMatrixAt(index, matrix);
+        counts.set(mat, index + 1);
       }
 
-      if (piece.type === 'wall') {
-        // Walls sit on the cell face, not at the cell centre.
-        const half = BUILD.tileSize / 2;
-        const off = { north: [0, -half], south: [0, half], east: [half, 0], west: [-half, 0] };
-        const [dx, dz] = off[piece.direction] ?? [0, -half];
-        p.set(c.x + dx, c.y, c.z + dz);
-      } else if (piece.type === 'floor') {
-        p.set(c.x, piece.cell.cy * BUILD.wallHeight, c.z);
-      } else {
-        p.set(c.x, piece.cell.cy * BUILD.wallHeight, c.z);
-      }
-
-      e.set(0, yaw, 0);
-      q.setFromEuler(e);
-      m.compose(p, q, one);
-      mesh.setMatrixAt(idx, m);
-      counts.set(key, idx + 1);
+      if (piece.type === 'ramp') this._appendRamp(piece, surfaceVerts.get(mat));
+      else if (piece.type === 'cone') this._appendCone(piece, surfaceVerts.get(mat));
     }
 
-    for (const [key, mesh] of this.instanced) {
-      mesh.count = counts.get(key) ?? 0;
+    for (const [mat, mesh] of this.tileMeshes) {
+      mesh.count = counts.get(mat);
       mesh.instanceMatrix.needsUpdate = true;
+    }
+
+    for (const [mat, mesh] of this.surfaceMeshes) {
+      const verts = surfaceVerts.get(mat);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      geo.computeVertexNormals();
+      mesh.geometry.dispose();
+      mesh.geometry = geo;
     }
   }
 
-  /** Translucent placement preview. MASTER_SPEC §6.3 rule 3. */
+  /** Two triangles per surviving ramp section, at that section's sloped height. */
+  _appendRamp(piece, out) {
+    for (const section of rampSections(piece)) {
+      const { min, max, yLow, yHigh } = section;
+      const ascendZ = piece.direction === 'north' || piece.direction === 'south';
+      const highAtMin = piece.direction === 'north' || piece.direction === 'west';
+
+      // Corners of this section's footprint, with height from the ascent axis.
+      const yAt = (x, z) => {
+        const along = ascendZ ? z : x;
+        const lo = ascendZ ? min[2] : min[0];
+        const hi = ascendZ ? max[2] : max[0];
+        const t = (along - lo) / Math.max(hi - lo, 1e-6);
+        return highAtMin ? yHigh + (yLow - yHigh) * t : yLow + (yHigh - yLow) * t;
+      };
+
+      const a = [min[0], yAt(min[0], min[2]), min[2]];
+      const b = [max[0], yAt(max[0], min[2]), min[2]];
+      const c = [max[0], yAt(max[0], max[2]), max[2]];
+      const d = [min[0], yAt(min[0], max[2]), max[2]];
+      out.push(...a, ...b, ...c, ...a, ...c, ...d);
+    }
+  }
+
+  /** One triangle per surviving cone quadrant, from its outer edge up to the apex. */
+  _appendCone(piece, out) {
+    const o = cellOrigin(piece.cell);
+    const apex = [o.x + TILE / 2, o.y + WALL_H, o.z + TILE / 2];
+    for (const quad of coneQuadrants(piece)) {
+      const { min, max } = quad;
+      const corners = [
+        [min[0], o.y, min[2]],
+        [max[0], o.y, min[2]],
+        [max[0], o.y, max[2]],
+        [min[0], o.y, max[2]]
+      ];
+      // Fan the quadrant footprint up to the apex.
+      for (let i = 0; i < corners.length; i++) {
+        const p = corners[i];
+        const q = corners[(i + 1) % corners.length];
+        out.push(...p, ...q, ...apex);
+      }
+    }
+  }
+
+  /**
+   * Placement preview (§9.2). Built from the SAME geometry source as a placed piece, so
+   * preview and final cannot disagree.
+   */
   _setupGhost() {
-    const geo = new THREE.BoxGeometry(BUILD.tileSize, BUILD.wallHeight, BUILD.thickness);
     this.ghostMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4cd94c, transparent: true, opacity: 0.35, depthWrite: false
+      color: 0x4cd94c, transparent: true, opacity: 0.38, depthWrite: false
     });
-    this.ghost = new THREE.Mesh(geo, this.ghostMaterial);
+    this.ghost = new THREE.Mesh(new THREE.BufferGeometry(), this.ghostMaterial);
     this.ghost.visible = false;
     this.scene.add(this.ghost);
   }
 
-  /** @param {{position:object, yaw:number, valid:boolean} | null} target */
-  updateGhost(target) {
-    if (!target) {
+  /** @param {{piece:object, valid:boolean}|null} preview a provisional BuildPiece */
+  updateGhost(preview) {
+    if (!preview) {
       this.ghost.visible = false;
       return;
     }
     this.ghost.visible = true;
-    this.ghost.position.set(target.position.x, target.position.y, target.position.z);
-    this.ghost.rotation.y = target.yaw ?? 0;
-    // §6.3 rule 3 — green placeable, red blocked.
-    this.ghostMaterial.color.setHex(target.valid ? 0x4cd94c : 0xe84c4c);
+    this.ghostMaterial.color.setHex(preview.valid ? 0x4cd94c : 0xe84c4c);
+
+    const verts = [];
+    for (const box of solidBoxes(preview.piece)) this._appendBox(box, verts);
+    if (preview.piece.type === 'ramp') this._appendRamp(preview.piece, verts);
+    if (preview.piece.type === 'cone') this._appendCone(preview.piece, verts);
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.computeVertexNormals();
+    this.ghost.geometry.dispose();
+    this.ghost.geometry = geo;
+  }
+
+  _appendBox(box, out) {
+    const [x0, y0, z0] = box.min;
+    const [x1, y1, z1] = box.max;
+    const v = [
+      [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+      [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
+    ];
+    const faces = [
+      [0, 1, 2], [0, 2, 3], [5, 4, 7], [5, 7, 6],
+      [4, 0, 3], [4, 3, 7], [1, 5, 6], [1, 6, 2],
+      [3, 2, 6], [3, 6, 7], [4, 5, 1], [4, 1, 0]
+    ];
+    for (const [a, b, c] of faces) out.push(...v[a], ...v[b], ...v[c]);
+  }
+
+  /**
+   * Edit overlay drawn in WORLD space on the target piece (§18), so it stays aligned as
+   * the player moves rather than floating as a screen overlay.
+   */
+  _setupEditOverlay() {
+    this.editOverlay = new THREE.Group();
+    this.editOverlay.visible = false;
+    this.scene.add(this.editOverlay);
+
+    this.editMaterialIdle = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.18, depthTest: false
+    });
+    this.editMaterialSelected = new THREE.MeshBasicMaterial({
+      color: 0x4cd94c, transparent: true, opacity: 0.45, depthTest: false
+    });
+  }
+
+  /** @param {{piece:object, selection:number[], tileBoxes:Array}|null} state */
+  updateEditOverlay(state) {
+    this.editOverlay.clear();
+    if (!state) {
+      this.editOverlay.visible = false;
+      return;
+    }
+    this.editOverlay.visible = true;
+
+    const selected = new Set(state.selection);
+    state.tileBoxes.forEach((box, index) => {
+      const w = Math.max(box.max[0] - box.min[0], 0.02);
+      const h = Math.max(box.max[1] - box.min[1], 0.02);
+      const d = Math.max(box.max[2] - box.min[2], 0.02);
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        selected.has(index) ? this.editMaterialSelected : this.editMaterialIdle
+      );
+      mesh.position.set(
+        (box.min[0] + box.max[0]) / 2,
+        (box.min[1] + box.max[1]) / 2,
+        (box.min[2] + box.max[2]) / 2
+      );
+      mesh.renderOrder = 999;
+      this.editOverlay.add(mesh);
+    });
   }
 
   syncCamera(playerCamera) {
@@ -282,7 +390,6 @@ export class Renderer {
       this.camera.fov = playerCamera.fov;
       this.camera.updateProjectionMatrix();
     }
-    // Keep the sun's shadow frustum centred on the player.
     this.sun.target.position.set(playerCamera.position.x, 0, playerCamera.position.z);
     this.sun.target.updateMatrixWorld();
   }
@@ -293,6 +400,24 @@ export class Renderer {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** §19 — render distance is a user setting, applied as a multiplier. */
+  setRenderDistance(multiplier) {
+    this.camera.far = WORLD.terrainDrawDistance * multiplier;
+    this.camera.updateProjectionMatrix();
+    if (this.scene.fog) {
+      this.scene.fog.near = WORLD.propLoadRadius * 0.6 * multiplier;
+      this.scene.fog.far = this.camera.far;
+    }
+  }
+
+  setQuality(level) {
+    // §23 — shadows and pixel ratio are the first things to shed under load.
+    const shadowSize = { low: 0, medium: 1024, high: 2048 }[level] ?? 2048;
+    this.renderer.shadowMap.enabled = shadowSize > 0;
+    if (shadowSize > 0 && this.sun) this.sun.shadow.mapSize.set(shadowSize, shadowSize);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, level === 'low' ? 1 : 2));
   }
 
   render() {
