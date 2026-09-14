@@ -255,10 +255,17 @@ export class Game {
     this.time += dt;
 
     // Drop phase runs its own reduced tick: no building, no combat, just descent (§5).
-    if (this.inDropPhase) {
+    // The drop branch pins the player to their descent, so it must end the moment THEY
+    // land — not when the whole lobby has. Waiting for everyone froze a landed player where
+    // they stood, unable to move, for as long as one straggler bot rode out the 30-second
+    // transport route. The match-wide phase (which the storm waits on) is unchanged.
+    if (this.inDropPhase && this.descent.state !== DropState.LANDED) {
       this._updateDropPhase(dt);
       return;
     }
+
+    // The transport keeps flying while anyone is still on it, even once the player is down.
+    if (this.inDropPhase) this.transport?.update(dt);
 
     const intent = this._readInput(dt);
 
@@ -374,6 +381,10 @@ export class Game {
         storm: this.storm,
         worldLoot: this.worldLoot,
         placeWall: (b) => this._botPlaceWall(b),
+        // A bot still on the transport needs it here too: without it a dropping bot that
+        // reaches this path stops descending and never lands, which is what held the
+        // match-wide drop phase open indefinitely.
+        transport: this.transport,
         lodRate
       });
     }
@@ -437,13 +448,22 @@ export class Game {
     });
 
     // Weapon slots and pickaxe leave build mode.
+    //
+    // The first slot and the pickaxe SHARE a key by default (BIND_CONFLICT_EXEMPT), and both
+    // branches used to run on one press: `select(0)` put the weapon out and `equipPickaxe()`
+    // immediately put it away again, so slot 1 could never be equipped at all. A shared bind
+    // toggles — the weapon when the pickaxe is out, the pickaxe when it is not. Rebind either
+    // action to its own key and the two behave independently again.
+    let tookSlot = false;
     for (let i = 0; i < this.inventory.size; i++) {
-      if (input.wasPressed(`weaponSlot${i + 1}`)) {
-        this.inventory.select(i);
-        this._setBuildMode(false);
-      }
+      if (!input.wasPressed(`weaponSlot${i + 1}`)) continue;
+      const shared = input.bindings[`weaponSlot${i + 1}`] === input.bindings.pickaxe;
+      if (shared && !this.inventory.pickaxeEquipped) continue;   // this press means "pickaxe"
+      this.inventory.select(i);
+      this._setBuildMode(false);
+      tookSlot = true;
     }
-    if (input.wasPressed('pickaxe')) {
+    if (!tookSlot && input.wasPressed('pickaxe')) {
       this.inventory.equipPickaxe();
       this._setBuildMode(false);
     }

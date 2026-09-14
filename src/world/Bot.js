@@ -144,7 +144,14 @@ export class Bot {
     const distance = Math.hypot(this.landingSpot.x - p.x, this.landingSpot.z - p.z);
     // Jump once the glide can reach the spot: rough horizontal reach from this altitude.
     const reach = (p.y / 12) * 26;
-    if (distance <= reach) {
+
+    // Or at the closest the route will ever bring us. A spot the transport never flies near
+    // enough to satisfy the reach test leaves the bot riding to the end of the window, and a
+    // bot still aboard holds the whole lobby's drop phase open.
+    const closing = this._lastSpotDistance === undefined || distance < this._lastSpotDistance;
+    this._lastSpotDistance = distance;
+
+    if (distance <= reach || !closing) {
       this.descent.jump(p, true);
       this.state = BotState.LANDING;
     }

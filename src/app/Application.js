@@ -25,8 +25,16 @@ export class Application {
    * @param {object} [opts.storage]   injected for tests
    * @param {number} [opts.seed]
    */
-  constructor({ storage = undefined, seed = null, settings = null } = {}) {
+  /**
+   * @param {object} [opts]
+   * @param {import('../core/Input.js').Input} [opts.input]
+   *   The Input attached to the canvas. WITHOUT IT nothing a player does reaches gameplay:
+   *   Game falls back to constructing its own, which is never attached to the DOM, so every
+   *   key and click is latched into an object no one reads.
+   */
+  constructor({ storage = undefined, seed = null, settings = null, input = null } = {}) {
     this.bus = new EventBus();
+    this.input = input;
     this.settings = settings ?? new Settings();
     this.profile = new ProfileManager({ bus: this.bus, storage });
     this.profile.load();
@@ -98,6 +106,7 @@ export class Application {
       seed,
       settings: this.settings,
       bus: this.bus,
+      input: this.input,
       cosmetics: this.profile.equippedLoadout(),
       botCount,
       registry: this.registry,

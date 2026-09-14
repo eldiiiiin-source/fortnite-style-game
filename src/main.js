@@ -25,6 +25,7 @@ const input = new Input(settings.bindings);
 
 const app = new Application({
   settings,
+  input,
   seed: seedParam !== null ? Number(seedParam) : null
 });
 

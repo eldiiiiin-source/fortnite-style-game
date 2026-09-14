@@ -10,6 +10,7 @@ import { MatchState } from '../src/match/MatchManager.js';
 import { SceneName } from '../src/app/SceneManager.js';
 import { COSMETICS } from '../src/meta/CosmeticCatalog.js';
 import { SIM } from '../src/core/Config.js';
+import { Input } from '../src/core/Input.js';
 import { PROFILE } from '../src/meta/MetaConfig.js';
 
 const dt = SIM.fixedDt;
@@ -218,6 +219,25 @@ describe('BATTLE_ROYALE_SPEC §20 — match acceptance', () => {
       app.returnToLobby();
     }
     expect(app.profile.profile.lifetimeStats.matchesPlayed).toBe(2);
+  });
+});
+
+describe('MASTER_SPEC §4 — the player’s input reaches gameplay', () => {
+  it('hands the match the Input the canvas is attached to', () => {
+    // Without this the game is unplayable by a human and nothing else notices: Game falls
+    // back to constructing its own Input, which is never attached to the DOM, so every key
+    // and click is latched into an object no system reads. Every other test drives the game
+    // through direct calls, so only a real keypress in a browser ever showed it.
+    const input = new Input();
+    const app = new Application({ storage: makeStorage(), seed: 3, input });
+    app.startMatch(2);
+
+    expect(app.input, 'Application dropped the input').toBe(input);
+    expect(app.game.input, 'the match is listening to a different Input').toBe(input);
+
+    // And it is live: a press on that Input is visible to the match.
+    input.simulatePress('Space');
+    expect(app.game.input.wasPressed('jump')).toBe(true);
   });
 });
 
