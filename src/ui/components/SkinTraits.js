@@ -29,7 +29,9 @@ const BUILD_LABELS = Object.freeze({
 
 const HEAD_LABELS = Object.freeze({
   wedge: 'Wedge head', chisel: 'Chisel head', leaf: 'Leaf blade', hook: 'Hooked head',
-  split: 'Split tine', beam: 'Beam edge', scrap: 'Welded scrap'
+  // `scrap` deliberately does NOT read "Welded scrap": that is Scrapjaw's theme, and the
+  // trait line prints theme then head form, so the two collided. This names the form.
+  split: 'Split tine', beam: 'Beam edge', scrap: 'Asymmetric cutter'
 });
 
 const HAFT_LABELS = Object.freeze({
