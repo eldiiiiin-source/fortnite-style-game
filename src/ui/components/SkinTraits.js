@@ -10,6 +10,7 @@
  */
 import { el } from '../dom.js';
 import { getSkin } from '../../cosmetics/SkinDefinitions.js';
+import { getTool } from '../../cosmetics/ToolDefinitions.js';
 
 /** camelCase feature name -> 'Spaced Words'. */
 function label(name) {
@@ -26,14 +27,48 @@ const BUILD_LABELS = Object.freeze({
   stout: 'Stout frame'
 });
 
+const HEAD_LABELS = Object.freeze({
+  wedge: 'Wedge head', chisel: 'Chisel head', leaf: 'Leaf blade', hook: 'Hooked head',
+  split: 'Split tine', beam: 'Beam edge', scrap: 'Welded scrap'
+});
+
+const HAFT_LABELS = Object.freeze({
+  straight: 'Straight haft', wrapped: 'Wrapped haft', pipe: 'Pipe haft'
+});
+
 /**
- * @param {object} cosmetic a catalog item
+ * @param {object} cosmetic a catalog item — an outfit, a harvesting tool, or anything
+ *                          else, in which case this renders nothing.
  * @returns {HTMLElement|null}
  */
 export function skinTraits(cosmetic) {
-  const skin = cosmetic ? getSkin(cosmetic.id) : null;
-  if (!skin) return null;
+  if (!cosmetic) return null;
+  const skin = getSkin(cosmetic.id);
+  if (skin) return outfitTraits(skin);
+  const tool = getTool(cosmetic.id);
+  if (tool) return toolTraits(tool);
+  return null;
+}
 
+/** Theme, head form, haft and details — SKIN_SPEC §11. */
+function toolTraits(tool) {
+  return el('div.skin-traits', {}, [
+    el('div.trait-line', {}, [
+      el('span.trait-key', { text: tool.theme }),
+      el('span.trait-dot', { text: '·' }),
+      el('span.trait-val', { text: HEAD_LABELS[tool.head] ?? tool.head })
+    ]),
+    el('div.trait-chips', {}, [
+      el('span.trait-chip', { text: HAFT_LABELS[tool.haft] ?? tool.haft }),
+      ...tool.details.map((d) => el('span.trait-chip', { text: label(d) }))
+    ]),
+    el('div.trait-swatches', {}, ['primary', 'secondary', 'accent', 'edge', 'detail'].map((role) =>
+      el('span.trait-swatch', { title: role, style: { background: tool.palette[role] } })
+    ))
+  ]);
+}
+
+function outfitTraits(skin) {
   return el('div.skin-traits', {}, [
     el('div.trait-line', {}, [
       el('span.trait-key', { text: skin.theme }),

@@ -152,6 +152,33 @@ export const CHARACTER = Object.freeze({
   })
 });
 
+/* ══ HARVESTING TOOL VIEW — SKIN_SPEC §11.1 ══════════════════════════════════
+ * How big a harvesting tool LOOKS. Purely cosmetic and derived from the character, so a
+ * retune of the build module rescales tools with their wielder.
+ *
+ * Damage, reach and swing rate are PICKAXE, below, and are identical for every equipped
+ * tool (ITEM_SHOP_SPEC §4.4). Nothing in this block reaches gameplay.
+ */
+
+export const PICKAXE_VIEW = Object.freeze({
+  length: CHARACTER.height * 0.42,
+  haftRadius: CHARACTER.radius * 0.1,
+  // The head carries the item's identity in a shop card, so it is generously sized
+  // against the haft. A correctly-proportioned real tool reads as a hammer on a stick.
+  headWidth: CHARACTER.radius * 1.5,
+  headHeight: CHARACTER.radius * 0.95,
+  headDepth: CHARACTER.radius * 0.55,
+  /**
+   * Where the tool sits in the hand when carried, relative to the character rig.
+   * The roll is NEGATIVE so the head leans away from the body — a positive roll tips it
+   * into the torso, where it clips the chest from behind the shoulder.
+   */
+  gripDrop: CHARACTER.height * 0.03,
+  gripOut: CHARACTER.radius * 0.3,
+  carryPitch: -0.5,
+  carryRoll: -0.3
+});
+
 /* ══ CAMERA — MASTER_SPEC §7 ═════════════════════════════════════════════════ */
 
 export const CAMERA = Object.freeze({

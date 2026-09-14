@@ -57,7 +57,7 @@ export class MatchScene extends Scene {
     this.hudRoot.appendChild(this.mapScreen.element);
 
     // The equipped outfit drives the avatar's colours, so cosmetics are visible in-match.
-    this.renderer.setAvatarCosmetics(game.cosmetics?.outfit ?? null);
+    this.renderer.setAvatarCosmetics(game.cosmetics?.outfit ?? null, game.cosmetics?.pickaxe ?? null);
     this.ui.applySettings({ renderer: this.renderer });
     this.ui.bindMatchHotkeys(this);
 

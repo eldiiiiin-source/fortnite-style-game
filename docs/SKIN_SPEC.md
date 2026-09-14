@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
-| Version | 1.0.0 |
-| Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, rarity presentation, and where skins render |
+| Version | 1.1.0 |
+| Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
 | Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
 | Implementation | Complete |
 
@@ -149,6 +149,39 @@ changes the **outline**, which is what makes skins readable — a decal never wo
 | `antenna` | Thin stalk with a tip bulb |
 | `stitchSeams` | Contrast seam lines across torso and limbs |
 
+### 6.1 Operator kit
+
+The premium tier needs denser kit than a hood and a pair of bracers. These features are
+what let an outfit read as *equipment* rather than as clothing.
+
+| Feature | Silhouette change |
+| --- | --- |
+| `aviatorCap` | Leather skull cap with ear flaps down the jaw and a chin strap |
+| `browGoggles` | Goggles pushed **up** onto the brow, leaving the face readable |
+| `headWrap` | Soft cloth wrap, taller than a cap, knotted off to one side |
+| `tankTop` | Sleeveless — repaints the arms as bare skin and adds a narrower vest |
+| `fingerlessGloves` | Glove at the wrist and palm, skin below it |
+| `thighRig` | Strapped thigh pouches, deliberately on one leg only |
+| `kneePads` | Hard caps at the knee |
+| `combatBoots` | Tall boots with a cuff and a raised sole |
+| `utilityBelt` | Belt, buckle and a hip pouch at the waist line |
+| `shoulderStrap` | One diagonal baldric across the chest, breaking the mirror |
+| `neckWrap` | Thick neck wrap with a fold |
+| `faceMarkings` | Painted brow flashes, cheek marks and a jaw line |
+| `skullMask` | Face plate with deep sockets |
+| `bonePattern` | Self-lit ribs, sternum, spine and limb bones |
+
+A feature may **repaint** parts the base body placed, not only add to them. Some garments
+are defined by what they remove — a tank top is bare arms, not an added sleeve — and
+without repainting, a sleeveless outfit would need a second base body.
+
+### 6.2 Self-lit parts
+
+Any part may be marked `glow`. The 3D view gives it an emissive material; the 2D painter
+draws a bloom behind it. This is a **material flag, not a rarity effect**: a common item
+may use it and a legendary one need not. It never changes how visible a player is to
+another player at gameplay distance.
+
 Features compose: a skin is its build plus three to six features. **No two skins in the
 roster may share the same (build, feature-set) pair** — asserted by test (§9).
 
@@ -189,17 +222,46 @@ revenant. It is an original character — the theme (a cheerful undead in a stit
 a genre staple, and the specific design, name, palette and silhouette here are this
 project's own.
 
-### 7.3 Rarity distribution
+### 7.3 The signature four
+
+The premium tier: denser kit, stronger colour identity, more silhouette per figure. These
+carry the shop. Each was designed from a mood brief as an **original character** built from
+this project's own rig, palette roles and feature vocabulary.
+
+| ID | Name | Rarity | Theme |
+| --- | --- | --- | --- |
+| `outfit_vexbloom` | Vexbloom | Epic | Neon revenant |
+| `outfit_goldspar` | Goldspar | Legendary | Elite aviator |
+| `outfit_voidmarrow` | Voidmarrow | Legendary | Glowing skeleton |
+| `outfit_coalcrest` | Coalcrest | Epic | Gilded operator |
+
+**Vexbloom** — hot pink skin against cyan cloth, two saturated hues at opposite ends of the
+wheel with everything else pushed neutral so they stay the whole story. Head wrap, goggles
+on the brow, sleeveless vest, painted face markings, utility belt. Lean frame.
+
+**Goldspar** — matte black carries the mass; gold appears only at buckles, soles and trim,
+which is what keeps it reading as expensive rather than as costume. Aviator cap, brow
+goggles, sleeveless, fingerless gloves, thigh rig, combat boots. Lean frame.
+
+**Voidmarrow** — a near-black base so the self-lit violet bones are the only thing the eye
+lands on. Skull mask, bone pattern, thigh rig, knee pads, combat boots. Athletic frame.
+
+**Coalcrest** — Goldspar's palette on a heavy frame: same colours, different mass, so the
+two read as a matched set (`Gilded Vanguard`) without either looking like a recolour.
+Helmet, neck wrap, sleeveless, shoulder strap, utility belt, knee pads.
+
+### 7.4 Rarity distribution
 
 | Rarity | Count |
 | --- | --- |
 | Common | 3 |
 | Uncommon | 4 |
 | Rare | 4 |
-| Epic | 3 |
-| Legendary | 2 |
+| Epic | 5 |
+| Legendary | 4 |
 
-Legendary is deliberately scarce: rarity reads as rarity only when the top tier is rare.
+Legendary stays the scarcest earned tier relative to the whole roster; the premium tier is
+where the shop's appeal lives, so epic carries the most weight.
 
 ## 8. Rarity presentation
 
@@ -225,11 +287,22 @@ the world — it would be a gameplay tell and hand paying players an advantage, 
    different hitbox — the capsule constants are identical for every equipped skin.
 3. Every skin's (build, features) pair is unique.
 4. Every skin declares all seven palette roles, with valid hex colours.
-5. `accent` never paints more than a quarter of the rig's parts.
+5. `accent` never paints more than a quarter of a rig's **non-glow** parts.
+
+   > Amended in 1.1.0. The original rule counted every accent part, which a deliberate
+   > glow pattern breaks by construction — Voidmarrow's ribs, spine and limb bones are
+   > accent-coloured and are the entire design. The rule's intent is that a loud colour
+   > must not sprawl across the base garment, and that still holds: glow parts are thin
+   > strips over a dark base, and §9.10 checks that base is actually dark.
+
 6. Rig construction is deterministic — the same skin yields an identical part list.
 7. Every rarity tier in the roster is represented and matches the §7.3 distribution.
 8. Every roster outfit is purchasable and equippable through the existing shop/locker path.
 9. All rig dimensions scale with the build module: doubling `standHeight` doubles the rig.
+10. A skin using `bonePattern` keeps a dark base — its `primary` luminance stays low
+    enough that the glow reads against it.
+11. Every harvesting tool builds a rig with a haft and a head, and no tool carries a
+    gameplay field.
 
 ## 10. Where skins render
 
@@ -240,6 +313,71 @@ the world — it would be a gameplay tell and hand paying players an advantage, 
 | Locker | `CharacterPainter` via `CosmeticPreview` | Selected item, rarity backdrop |
 | Match | `CharacterView` via `Renderer` | Equipped outfit on the third-person avatar |
 
+## 11. Harvesting tools
+
+A harvesting tool is a rig, exactly as a character is: data in, part list out, one 3D view
+and one 2D painter consuming it. `cosmetics/ToolDefinitions.js` holds the roster,
+`cosmetics/ToolRig.js` builds the parts.
+
+### 11.1 Rig space and scale
+
+Origin is the **grip** — the point the hand closes on — with `+Y` up the haft toward the
+head and `+Z` the striking face. Anchoring at the grip rather than the butt means a long
+tool and a short one both sit correctly in the same hand. Dimensions come from
+`PICKAXE_VIEW` in Config, derived from the character, so a build-module retune rescales
+tools with their wielder.
+
+`PICKAXE_VIEW` is cosmetic only. Damage, reach and swing rate are `PICKAXE`, and are
+**identical for every equipped tool** (`ITEM_SHOP_SPEC §4.4`).
+
+### 11.2 Head forms
+
+`wedge` (plain issue pick), `chisel` (flat quarry bit), `leaf` (tapered blade), `hook`
+(curved sea hook), `split` (twin tine), `beam` (energy edge), `scrap` (welded plate).
+
+### 11.3 Haft styles
+
+`straight`, `wrapped` (grip wrap at the hand), `pipe` (salvaged tube with a cut collar).
+
+### 11.4 Tool details
+
+`bolts`, `binding`, `counterweight`, `spikes`, `rags`, `glowEdge`.
+
+### 11.5 Scrapjaw
+
+The signature tool, sitting beside the premium outfits. Epic.
+
+- **Palette** — dark steel body (`#4a525c`), rust-red plate (`#a8412a`), worn bare metal at
+  the edge (`#b9c2cc`), near-black haft (`#241b14`).
+- **Silhouette** — deliberately asymmetric and layered: a plate bolted over a backing bar,
+  a cutting edge that overhangs one side only, a counter-spike on the other, and a shim
+  wedged behind. The asymmetry *is* the silhouette; a symmetrical scrap head just reads as
+  a hammer.
+- **Material** — pipe haft with a taped grip and a cut collar, cord lashing at the joint,
+  welded spikes along the back, a hanging rag.
+- **Flavour** — *"Four things that failed at their old jobs, welded into one that does not."*
+
+### 11.6 Where tools render
+
+Shop, locker and lobby previews paint the tool rig on the diagonal. In match, the tool is
+parented to the character's right hand, read off the rig's own hand position so a heavy
+frame's tool sits further out than a lean frame's.
+
+## 12. Render fidelity
+
+Flat fills read as placeholder art. One lighting model is applied to whatever any rig
+emits — never per-item artwork, which is why adding a cosmetic never means drawing one.
+
+| Technique | Why |
+| --- | --- |
+| Three-face shading — lit top, mid front, shaded lower edge | Stacked boxes stop reading as one flat slab |
+| Lift-toward-white highlights instead of a flat multiply | A near-black outfit keeps its form instead of going to pure black on every face |
+| Darkening with a floor | A black part never becomes a hole in the silhouette |
+| Gradient across spheres and cylinders | Curvature, rather than discs and rectangles |
+| Bloom behind self-lit parts | Glow reads as emission, not as bright paint |
+| Two-layer contact shadow | Sits the figure on the ground instead of stickering it on |
+| Dark stage pool behind the figure | A skin whose palette matches its rarity hue keeps its edges |
+
 ---
 
 ## Changelog
@@ -247,3 +385,4 @@ the world — it would be a gameplay tell and hand paying players an advantage, 
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |
+| 1.1.0 | 2026-09-14 | Operator-kit features and self-lit parts (§6.1, §6.2); the signature four (§7.3); harvesting tools as rigs, with Scrapjaw (§11); render fidelity model (§12). Accent rule amended to count non-glow parts only (§9.5). |

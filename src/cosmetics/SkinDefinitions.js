@@ -49,7 +49,23 @@ export const Feature = Object.freeze({
   BACK_TANK: 'backTank',
   SPINE_FIN: 'spineFin',
   ANTENNA: 'antenna',
-  STITCH_SEAMS: 'stitchSeams'
+  STITCH_SEAMS: 'stitchSeams',
+
+  /* Operator kit — SKIN_SPEC §6.1 */
+  AVIATOR_CAP: 'aviatorCap',
+  BROW_GOGGLES: 'browGoggles',
+  HEAD_WRAP: 'headWrap',
+  TANK_TOP: 'tankTop',
+  FINGERLESS_GLOVES: 'fingerlessGloves',
+  THIGH_RIG: 'thighRig',
+  KNEE_PADS: 'kneePads',
+  COMBAT_BOOTS: 'combatBoots',
+  UTILITY_BELT: 'utilityBelt',
+  SHOULDER_STRAP: 'shoulderStrap',
+  NECK_WRAP: 'neckWrap',
+  FACE_MARKINGS: 'faceMarkings',
+  SKULL_MASK: 'skullMask',
+  BONE_PATTERN: 'bonePattern'
 });
 
 const F = Feature;
@@ -301,8 +317,91 @@ const EXPANSION = [
   })
 ];
 
+/* ── The signature four — SKIN_SPEC §7.3 ─────────────────────────────────────
+ * The premium tier: denser kit, stronger colour identity, more silhouette per figure.
+ * These carry the shop.
+ *
+ * Each was designed from a mood brief — a neon revenant, an elite aviator, a glowing
+ * skeleton, a gold-trimmed operator — as ORIGINAL characters built from this project's
+ * own rig, palette roles and feature vocabulary. They are not reproductions of any
+ * existing game's characters, and share no names, markings or proportions with them.
+ */
+
+const SIGNATURE = [
+  skin('outfit_vexbloom', {
+    name: 'Vexbloom',
+    rarity: 'epic',
+    theme: 'Neon revenant',
+    description: 'Came back wrong, came back brighter. No complaints so far.',
+    build: Build.LEAN,
+    features: [F.HEAD_WRAP, F.BROW_GOGGLES, F.TANK_TOP, F.FACE_MARKINGS, F.UTILITY_BELT],
+    pricePosition: 0.8,
+    tags: ['spooky', 'neon'],
+    palette: {
+      // Hot pink skin against cyan cloth: two saturated hues at opposite ends of the
+      // wheel, with everything else pushed to neutral so they stay the whole story.
+      primary: '#f4f6f8', secondary: '#39424f', accent: '#25dbe8',
+      skin: '#ff6fb5', hair: '#25dbe8', detail: '#222a35', visor: '#ffd45e'
+    }
+  }),
+  skin('outfit_goldspar', {
+    name: 'Goldspar',
+    rarity: 'legendary',
+    theme: 'Elite aviator',
+    description: 'Flies in, walks out. The gear has never needed explaining.',
+    build: Build.LEAN,
+    features: [
+      F.AVIATOR_CAP, F.BROW_GOGGLES, F.TANK_TOP, F.FINGERLESS_GLOVES,
+      F.THIGH_RIG, F.COMBAT_BOOTS
+    ],
+    pricePosition: 0.9,
+    set: 'Gilded Vanguard',
+    tags: ['operator'],
+    palette: {
+      // Matte black carries the mass; gold appears only at buckles, soles and trim,
+      // which is what keeps it reading as expensive rather than as costume.
+      primary: '#1a1d22', secondary: '#282c33', accent: '#e8b53a',
+      skin: '#d29a6e', hair: '#3a2a1c', detail: '#101216', visor: '#f3dc92'
+    }
+  }),
+  skin('outfit_voidmarrow', {
+    name: 'Voidmarrow',
+    rarity: 'legendary',
+    theme: 'Glowing skeleton',
+    description: 'Whatever is holding it together is doing so in violet.',
+    build: Build.ATHLETIC,
+    features: [F.SKULL_MASK, F.BONE_PATTERN, F.THIGH_RIG, F.KNEE_PADS, F.COMBAT_BOOTS],
+    pricePosition: 0.95,
+    tags: ['spooky', 'glow'],
+    palette: {
+      // Near-black base so the self-lit bones are the only thing the eye lands on.
+      primary: '#14161c', secondary: '#1d2028', accent: '#a24cff',
+      skin: '#8a5cd6', hair: '#14161c', detail: '#0c0e12', visor: '#d7b3ff'
+    }
+  }),
+  skin('outfit_coalcrest', {
+    name: 'Coalcrest',
+    rarity: 'epic',
+    theme: 'Gilded operator',
+    description: 'Same colours as Goldspar, half the patience.',
+    build: Build.HEAVY,
+    features: [
+      F.HELMET, F.NECK_WRAP, F.TANK_TOP, F.SHOULDER_STRAP, F.UTILITY_BELT, F.KNEE_PADS
+    ],
+    pricePosition: 0.85,
+    set: 'Gilded Vanguard',
+    tags: ['operator'],
+    palette: {
+      // The set's shared palette on a heavy frame: same colours, different mass, so the
+      // pair reads as a matched set without either one looking like a recolour.
+      primary: '#16191e', secondary: '#252931', accent: '#e8b53a',
+      skin: '#8a5a3a', hair: '#1a1410', detail: '#0d0f13', visor: '#f3dc92'
+    }
+  })
+];
+
 /** The full roster, in catalog order. */
-export const SKINS = Object.freeze([...FOUNDING, ...EXPANSION]);
+export const SKINS = Object.freeze([...FOUNDING, ...EXPANSION, ...SIGNATURE]);
 
 const BY_ID = new Map(SKINS.map((s) => [s.id, s]));
 

@@ -16,7 +16,9 @@ import { hashString } from '../../core/Random.js';
 import { RARITIES, RARITY_ORDER } from '../../core/Config.js';
 import { buildCharacterRig } from '../../cosmetics/CharacterRig.js';
 import { getSkin } from '../../cosmetics/SkinDefinitions.js';
-import { paintCharacter } from './CharacterPainter.js';
+import { buildToolRig } from '../../cosmetics/ToolRig.js';
+import { getTool } from '../../cosmetics/ToolDefinitions.js';
+import { paintCharacter, paintTool } from './CharacterPainter.js';
 
 /** Deterministic 0..1 from a cosmetic id and a salt. */
 function seeded(id, salt) {
@@ -109,6 +111,15 @@ export class CosmeticPreview {
       return;
     }
 
+    // Harvesting tools are rigs too (SKIN_SPEC §11), from the same part vocabulary.
+    const tool = cosmetic.category === CosmeticCategory.PICKAXE ? getTool(cosmetic.id) : null;
+    if (tool) {
+      paintTool(ctx, this._rigFor(tool), {
+        width: w, height: h, yaw: Math.sin(this.angle) * 0.7
+      });
+      return;
+    }
+
     // Ground shadow, so the shape reads as an object rather than a sticker.
     ctx.save();
     ctx.globalAlpha = 0.28;
@@ -137,9 +148,14 @@ export class CosmeticPreview {
     ctx.restore();
   }
 
-  /** Rigs are deterministic and reused across frames — build each one once. */
-  _rigFor(skin) {
-    if (this._rig?.skin?.id !== skin.id) this._rig = buildCharacterRig(skin);
+  /**
+   * Rigs are deterministic and reused across frames — build each one once.
+   * Handles a skin or a tool; both expose `id` and both produce a part list.
+   */
+  _rigFor(owner) {
+    if (this._rig?.skin?.id !== owner.id) {
+      this._rig = owner.head !== undefined ? buildToolRig(owner) : buildCharacterRig(owner);
+    }
     return this._rig;
   }
 

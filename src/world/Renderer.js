@@ -480,8 +480,9 @@ export class Renderer {
    * unknown or missing one falls back to a valid skin rather than leaving the player
    * invisible (SKIN_SPEC §7).
    */
-  setAvatarCosmetics(outfit) {
+  setAvatarCosmetics(outfit, pickaxe = null) {
     this.character.setSkin(outfit?.id ?? DEFAULT_EQUIPPED.outfit);
+    this.character.setTool(pickaxe?.id ?? DEFAULT_EQUIPPED.pickaxe);
   }
 
   /**

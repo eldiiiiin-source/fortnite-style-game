@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.1.0 |
+| Version | 1.2.0 |
 | Covers | Player profile, virtual currency, cosmetic ownership, item shop, locker, equipping, local persistence, shop rotation |
 | Companion | `docs/BATTLE_ROYALE_SPEC.md`, `docs/MASTER_SPEC.md`, `docs/SKIN_SPEC.md` |
 | Implementation | **Not started** — held until `ADMIN_PANEL_SPEC.md` arrives |
@@ -233,19 +233,19 @@ from each gameplay-visible category is owned initially.
 
 | Category | Count |
 | --- | --- |
-| Outfits | 16 |
-| Pickaxes | 6 |
+| Outfits | 20 |
+| Pickaxes | 7 |
 | Gliders | 6 |
 | Back accessories | 5 |
 | Emotes | 8 |
 | Wraps | 6 |
-| **Total** | **≥ 39** |
+| **Total** | **≥ 52** |
 
 Placeholder models are acceptable during development provided IDs are stable and categories,
 previews, purchases and equipping all work.
 
-> Outfits are no longer placeholders. `docs/SKIN_SPEC.md` governs the character rig, the
-> palette roles, the silhouette features and the sixteen-outfit roster; this document still
+> Outfits and harvesting tools are no longer placeholders. `docs/SKIN_SPEC.md` governs the
+> character rig, the tool rig, the palette roles, the silhouette features and both rosters; this document still
 > governs their ownership, pricing, shop rotation and equipping. Where the two touch — a
 > skin's rarity, price band or ID — this document wins.
 
@@ -339,3 +339,4 @@ the lobby and in matches. **No cosmetic may affect gameplay stats.**
 | --- | --- | --- |
 | 1.0.0 | 2026-09-13 | Initial authoritative specification from the project owner. |
 | 1.1.0 | 2026-09-14 | Outfit roster raised 8 → 16 for the skin system; outfit appearance delegated to `docs/SKIN_SPEC.md`. |
+| 1.2.0 | 2026-09-14 | Outfits 16 → 20 and harvesting tools 6 → 7 for the premium tier; tool appearance delegated to `docs/SKIN_SPEC.md` §11. |

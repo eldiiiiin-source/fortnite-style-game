@@ -13,7 +13,9 @@ import {
   buildCharacterRig, partColour, PartShape
 } from '../cosmetics/CharacterRig.js';
 import { skinOrFallback } from '../cosmetics/SkinDefinitions.js';
-import { CHARACTER } from '../core/Config.js';
+import { buildToolRig } from '../cosmetics/ToolRig.js';
+import { toolOrFallback } from '../cosmetics/ToolDefinitions.js';
+import { CHARACTER, PICKAXE_VIEW } from '../core/Config.js';
 
 /** Shared geometries: every part is a unit primitive scaled to its size. */
 const UNIT = {
@@ -48,9 +50,15 @@ export class CharacterView {
     this.group = new THREE.Group();
     this.skin = null;
     this.rig = null;
-    this.materials = new Map();   // role -> MeshLambertMaterial
+    this.materials = new Map();   // colour+glow key -> MeshLambertMaterial
     this.parts = new Map();       // part id -> Mesh
     this.ownedGeometries = [];    // per-part geometries this view must dispose
+
+    // The held harvesting tool, parented to the character so it inherits the crouch
+    // squash and the yaw without a second transform to keep in sync.
+    this.toolGroup = new THREE.Group();
+    this.group.add(this.toolGroup);
+    this.tool = null;
   }
 
   get object3D() {
@@ -66,38 +74,85 @@ export class CharacterView {
     const skin = skinOrFallback(id);
     if (this.skin?.id === skin.id) return;
 
+    const heldTool = this.tool;
     this._clear();
     this.skin = skin;
     this.rig = buildCharacterRig(skin);
+    this._build(this.rig.parts, skin, this.group, '');
 
-    for (const part of this.rig.parts) {
-      const mesh = new THREE.Mesh(UNIT[part.shape] ?? UNIT.box, this._material(skin, part));
+    // Materials are shared per view and were just disposed, so the held tool is rebuilt
+    // against the new material set rather than left pointing at freed ones.
+    if (heldTool) {
+      this.tool = null;
+      this.setTool(heldTool);
+    }
+    this._placeToolInHand();
+  }
+
+  /**
+   * Equip a harvesting tool, held in the right hand (SKIN_SPEC §11.6).
+   * Accepts a tool, a tool id, or a catalog cosmetic.
+   */
+  setTool(toolOrCosmetic) {
+    const id = typeof toolOrCosmetic === 'string' ? toolOrCosmetic : toolOrCosmetic?.id;
+    const tool = toolOrFallback(id);
+    if (this.tool?.id === tool.id) return;
+
+    for (const mesh of [...this.toolGroup.children]) mesh.removeFromParent();
+    this.tool = tool;
+    this._build(buildToolRig(tool).parts, tool, this.toolGroup, 'tool:');
+    this._placeToolInHand();
+  }
+
+  /**
+   * Seat the tool group at the right hand.
+   *
+   * Read off the rig's own hand part rather than hard-coded: a heavy frame's hand sits
+   * further out than a lean one's, and the tool has to follow it.
+   */
+  _placeToolInHand() {
+    const m = this.rig?.metrics;
+    if (!m) return;
+    this.toolGroup.position.set(
+      m.armX + PICKAXE_VIEW.gripOut,
+      m.shoulderY - m.armLength - PICKAXE_VIEW.gripDrop,
+      m.armDepth * 0.3
+    );
+    this.toolGroup.rotation.set(PICKAXE_VIEW.carryPitch, 0, PICKAXE_VIEW.carryRoll);
+  }
+
+  _build(parts, owner, parent, idPrefix) {
+    for (const part of parts) {
+      const mesh = new THREE.Mesh(UNIT[part.shape] ?? UNIT.box, this._material(owner, part));
       applyPartTransform(mesh, part, this.ownedGeometries);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
-      this.group.add(mesh);
-      this.parts.set(part.id, mesh);
+      parent.add(mesh);
+      this.parts.set(idPrefix + part.id, mesh);
     }
   }
 
-  _material(skin, part) {
-    const colour = partColour(skin, part);
-    let mat = this.materials.get(colour);
+  _material(owner, part) {
+    const colour = partColour(owner, part);
+    // A lens and a glowing bone share a colour but not a material, so the key carries
+    // both. Without this the first one built would decide how the other looked.
+    const key = `${colour}|${part.glow ? 'glow' : part.role === 'visor' ? 'lens' : 'flat'}`;
+    let mat = this.materials.get(key);
     if (!mat) {
-      // `visor` reads as a lens rather than paint: slightly emissive so it stays bright
-      // in shadow. Presentation only — no gameplay tell (SKIN_SPEC §8).
-      const isLens = part.role === 'visor';
+      // `visor` reads as a lens rather than paint; `glow` is self-lit geometry. Both are
+      // material choices, never rarity effects — no gameplay tell (SKIN_SPEC §8).
+      const lift = part.glow ? 0.85 : part.role === 'visor' ? 0.28 : 0;
       mat = new THREE.MeshLambertMaterial({
         color: colour,
-        emissive: isLens ? new THREE.Color(colour).multiplyScalar(0.28) : 0x000000
+        emissive: lift > 0 ? new THREE.Color(colour).multiplyScalar(lift) : 0x000000
       });
-      this.materials.set(colour, mat);
+      this.materials.set(key, mat);
     }
     return mat;
   }
 
   _clear() {
-    for (const mesh of this.parts.values()) this.group.remove(mesh);
+    for (const mesh of this.parts.values()) mesh.removeFromParent();
     this.parts.clear();
     // Only geometries this view built — the shared UNIT primitives outlive every view.
     for (const geo of this.ownedGeometries) geo.dispose();

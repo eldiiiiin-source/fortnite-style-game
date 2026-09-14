@@ -13,6 +13,7 @@
  */
 import { PRICE_BANDS } from './MetaConfig.js';
 import { SKINS } from '../cosmetics/SkinDefinitions.js';
+import { TOOLS } from '../cosmetics/ToolDefinitions.js';
 
 export const CosmeticCategory = Object.freeze({
   OUTFIT: 'outfit',
@@ -95,15 +96,17 @@ const OUTFITS = SKINS.map((skin) => item(
   }
 ));
 
-/** 6 harvesting tools */
-const PICKAXES = [
-  item('pickaxe_standard', 'Standard Issue', P, 'common', 'It does the job.', 0.1, { palette: ['#6b7280', '#cbd5e1'] }),
-  item('pickaxe_quarry', 'Quarry Bit', P, 'common', 'Worn smooth by stone.', 0.7, { palette: ['#7b7466', '#c6bda9'] }),
-  item('pickaxe_splitleaf', 'Splitleaf', P, 'uncommon', 'Shaped like a falling leaf.', 0.5, { palette: ['#3f7a45', '#95d39c'], set: 'Wildline' }),
-  item('pickaxe_tidebreak', 'Tidebreak', P, 'rare', 'Salt-pitted and sharp.', 0.3, { palette: ['#2b6f8f', '#8fd8ec'] }),
-  item('pickaxe_emberfall', 'Emberfall', P, 'epic', 'Still warm to the touch.', 0.5, { palette: ['#8f3f2b', '#f2a074'] }),
-  item('pickaxe_lumen', 'Lumen', P, 'legendary', 'Cuts a line of light.', 0.6, { palette: ['#1f6f8a', '#9df2ff'] })
-];
+/**
+ * Harvesting tools come from the tool roster (SKIN_SPEC §11), for the same reason outfits
+ * come from the skin roster: appearance is declared once, commerce is declared here.
+ */
+const PICKAXES = TOOLS.map((t) => item(
+  t.id, t.name, P, t.rarity, t.description, t.pricePosition, {
+    palette: [t.palette.primary, t.palette.accent],
+    set: t.set,
+    tags: [...t.tags, t.theme.toLowerCase()]
+  }
+));
 
 /** 6 gliders */
 const GLIDERS = [

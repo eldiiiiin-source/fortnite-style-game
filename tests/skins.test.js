@@ -37,15 +37,32 @@ function memoryProfile(storage = makeStorage()) {
 }
 
 describe('SKIN_SPEC §7 — the roster', () => {
-  it('carries sixteen outfits', () => {
-    expect(SKINS.length).toBe(16);
-    expect(catalogCounts().outfit).toBe(16);
+  it('carries twenty outfits', () => {
+    expect(SKINS.length).toBe(20);
+    expect(catalogCounts().outfit).toBe(20);
   });
 
-  it('matches the §7.3 rarity distribution', () => {
+  it('matches the §7.4 rarity distribution', () => {
     expect(skinRarityCounts()).toEqual({
-      common: 3, uncommon: 4, rare: 4, epic: 3, legendary: 2
+      common: 3, uncommon: 4, rare: 4, epic: 5, legendary: 4
     });
+  });
+
+  it('carries the signature four (§7.3)', () => {
+    for (const id of [
+      'outfit_vexbloom', 'outfit_goldspar', 'outfit_voidmarrow', 'outfit_coalcrest'
+    ]) {
+      expect(getSkin(id), id).not.toBeNull();
+    }
+  });
+
+  it('pairs the Gilded Vanguard set across two different builds', () => {
+    const set = SKINS.filter((s) => s.set === 'Gilded Vanguard');
+    expect(set.length).toBe(2);
+    // Same palette, different mass — that is what makes a set read as a set rather than
+    // as one skin shipped twice.
+    expect(set[0].palette.accent).toBe(set[1].palette.accent);
+    expect(set[0].build).not.toBe(set[1].build);
   });
 
   it('uses every rarity tier', () => {
@@ -101,11 +118,23 @@ describe('SKIN_SPEC §4 — palette roles', () => {
     }
   });
 
-  it('keeps the accent to a small share of the parts (§9.5)', () => {
+  it('keeps the accent to a small share of the NON-GLOW parts (§9.5)', () => {
     for (const skin of SKINS) {
       const rig = buildCharacterRig(skin);
-      const accented = rig.parts.filter((p) => p.role === 'accent').length;
-      expect(accented / rig.parts.length, skin.id).toBeLessThanOrEqual(0.25);
+      const solid = rig.parts.filter((p) => !p.glow);
+      const accented = solid.filter((p) => p.role === 'accent').length;
+      expect(accented / solid.length, skin.id).toBeLessThanOrEqual(0.25);
+    }
+  });
+
+  it('keeps a dark base under a glow pattern (§9.10)', () => {
+    for (const skin of SKINS) {
+      const rig = buildCharacterRig(skin);
+      if (!rig.parts.some((p) => p.glow)) continue;
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(skin.palette.primary.slice(i, i + 2), 16));
+      const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      expect(luminance, `${skin.id} primary is too light to carry a glow`)
+        .toBeLessThan(0.3);
     }
   });
 
