@@ -28,7 +28,7 @@ export function facingDirection(dirX, dirZ) {
  * @returns {{cell:object, direction:string, distance:number} | null}
  */
 export function resolveBuildTarget({
-  origin, direction, pieceType, rotation = null, grid, step = 0.35
+  origin, direction, pieceType, rotation = null, grid, step = 0.35, minDistance = 0
 }) {
   const range = BUILD.placementRange;
   // Walls face the player, so the default direction is the one the player is looking at.
@@ -36,7 +36,10 @@ export function resolveBuildTarget({
 
   let lastCellKey = null;
 
-  for (let d = 0; d <= range; d += step) {
+  // The aim ray starts at the CAMERA (§8.1), which sits behind the player. Marching from
+  // zero would target cells around and behind the character, so the walk begins once the
+  // ray has cleared the camera-to-player gap.
+  for (let d = minDistance; d <= range; d += step) {
     const px = origin.x + direction.x * d;
     const py = origin.y + direction.y * d;
     const pz = origin.z + direction.z * d;

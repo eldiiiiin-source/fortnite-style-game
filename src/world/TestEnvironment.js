@@ -96,9 +96,18 @@ export class TestEnvironment {
     return Math.abs(x) <= TEST_REGION.halfExtent && Math.abs(z) <= TEST_REGION.halfExtent;
   }
 
-  /** A safe, flat spawn point in the open field. */
+  /**
+   * A safe, flat spawn point in the open field.
+   *
+   * Deliberately a CELL CENTRE, not the world origin. The origin is a build-grid corner,
+   * and a player standing exactly on a cell boundary overlaps any wall placed on that
+   * cell's face — which makes every build preview show as blocked. Spawning mid-cell is
+   * the position a player would occupy in normal play.
+   */
   spawnPoint() {
-    return { x: 0, y: this.heightAt(0, 0), z: 0 };
+    const x = TILE / 2;
+    const z = TILE / 2;
+    return { x, y: this.heightAt(x, z), z };
   }
 
   /** Sample a chunk into a heightfield for meshing. */

@@ -226,18 +226,22 @@ fast edits.
 
 | Parameter | Value | Marker |
 | --- | --- | --- |
-| Distance | 2.6 m | [PROV] |
-| Shoulder offset (right) | 0.45 m | [PROV] |
+| Distance | 4.0 m | [PROV] |
+| Shoulder offset (right) | 0.8 m | [PROV] |
 | Height above player base | 1.55 m | [PROV] |
 | Pitch clamp | −85° to +85° | [PROV] |
 | Base FOV | 80° (user-adjustable, §39) | [PROV] |
 | Crouch camera drop | 0.6 m, 120 ms | [PROV] |
 | Build-mode distance | 2.6 m — **unchanged**, edit precision | [OWNER-derived] |
 
-> **Change from baseline:** distance reduced 3.2 → 2.6 m and shoulder offset 0.55 → 0.45 m
-> per "close" and "not too far away". The baseline also pulled the camera *back* in build
-> mode, which directly contradicts "precise enough for fast edits" — that behaviour is
-> removed.
+> **Change from baseline:** the baseline pulled the camera *back* in build mode, which
+> directly contradicts "precise enough for fast edits" — that behaviour is removed.
+>
+> **Retuned 2026-09-13 against the rendered view.** Distance was briefly set to 2.6 m to
+> honour "close", but at that range a 1.92 m avatar fills the frame and occludes the
+> crosshair — which §8 forbids in effect, since the player cannot see what they are aiming
+> at. 4.0 m with a 0.8 m shoulder offset keeps the camera close and the character
+> "slightly left of screen centre" while leaving the aim point clear.
 
 ### 7.1 Camera collision [OWNER]
 
@@ -945,7 +949,7 @@ or derived. Listed highest-impact first.
 
 | # | Value | Current | Why it matters |
 | --- | --- | --- | --- |
-| 3 | Camera distance / shoulder offset | 2.6 m / 0.45 m | "Close", "not too far", edit precision |
+| 3 | Camera distance / shoulder offset | 4.0 m / 0.8 m | "Close", "not too far", edit precision — retuned against the rendered view |
 | 4 | Movement speeds and acceleration | 4.6 / 7.6 / 2.4 m/s, 85 m/s² | Whole feel of the game |
 | 5 | Weapon damage / fire rate table | §12.1 | All combat balance |
 | 6 | Placement cooldown and queue depth | 0.05 s, 3 | "No dropped inputs" |

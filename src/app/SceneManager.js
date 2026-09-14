@@ -29,8 +29,14 @@ export class Scene {
   exit() {}
   /** Fixed-step update while active. */
   update(_dt) {}
-  /** Called once per rendered frame while active. */
-  render(_alpha) {}
+  /**
+   * Called once per rendered frame while active.
+   *
+   * Deliberately NOT named `render`: menu scenes use `render()` to rebuild their DOM, and
+   * driving that every frame detaches elements mid-interaction. The two concerns get two
+   * names so they cannot be confused again.
+   */
+  frame(_alpha) {}
 }
 
 export class SceneManager {
@@ -100,12 +106,12 @@ export class SceneManager {
     }
   }
 
-  render(alpha) {
+  frame(alpha) {
     if (!this.current) return;
     try {
-      this.current.render(alpha);
+      this.current.frame(alpha);
     } catch (err) {
-      console.error(`Scene ${this.current.name} render() threw:`, err);
+      console.error(`Scene ${this.current.name} frame() threw:`, err);
     }
   }
 }

@@ -11,9 +11,12 @@
  */
 import * as THREE from 'three';
 import {
-  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA
+  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA, MOVEMENT
 } from '../core/Config.js';
 import { solidBoxes, rampSections, coneQuadrants, cellOrigin } from '../building/PieceGeometry.js';
+
+/** Storm wall height — tall enough to read from the ground at any build height. */
+const STORM_WALL_HEIGHT = WALL_H * 30;
 
 /** MAP_SPEC §10 palette — bright, clean, stylised. */
 const PALETTE = Object.freeze({
@@ -50,6 +53,8 @@ export class Renderer {
     this._setupBuildMeshes();
     this._setupGhost();
     this._setupEditOverlay();
+    this._setupStorm();
+    this._setupAvatar();
 
     this.lastGridRevision = -1;
     this.onResize();
@@ -374,6 +379,157 @@ export class Renderer {
       mesh.renderOrder = 999;
       this.editOverlay.add(mesh);
     });
+  }
+
+  /**
+   * Storm visuals — BATTLE_ROYALE_SPEC §8.4.
+   *
+   * A visible wall, not colour grading: a tall cylinder rendered from the inside, plus a
+   * ground ring marking the safe zone and a dashed ring for the next one. Simulation
+   * values are read, never written.
+   */
+  _setupStorm() {
+    this.stormGroup = new THREE.Group();
+    this.scene.add(this.stormGroup);
+
+    const wallGeo = new THREE.CylinderGeometry(1, 1, STORM_WALL_HEIGHT, 64, 1, true);
+    this.stormWallMaterial = new THREE.MeshBasicMaterial({
+      color: 0x9b4cdd, transparent: true, opacity: 0.22,
+      side: THREE.BackSide, depthWrite: false
+    });
+    this.stormWall = new THREE.Mesh(wallGeo, this.stormWallMaterial);
+    this.stormWall.visible = false;
+    this.stormGroup.add(this.stormWall);
+
+    // Safe-zone ring on the ground, so the boundary reads from above too.
+    const ringGeo = new THREE.RingGeometry(0.98, 1.0, 96);
+    ringGeo.rotateX(-Math.PI / 2);
+    this.stormRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false
+    }));
+    this.stormRing.visible = false;
+    this.stormGroup.add(this.stormRing);
+
+    const nextGeo = new THREE.RingGeometry(0.985, 1.0, 96);
+    nextGeo.rotateX(-Math.PI / 2);
+    this.nextZoneRing = new THREE.Mesh(nextGeo, new THREE.MeshBasicMaterial({
+      color: 0x45c8e8, transparent: true, opacity: 0.65, side: THREE.DoubleSide, depthWrite: false
+    }));
+    this.nextZoneRing.visible = false;
+    this.stormGroup.add(this.nextZoneRing);
+  }
+
+  /**
+   * @param {object|null} storm  snapshot from Storm.snapshot()
+   * @param {boolean} playerInside
+   */
+  updateStorm(storm, playerInside = true) {
+    if (!storm || storm.state === 'idle' || storm.radius <= 0) {
+      this.stormWall.visible = false;
+      this.stormRing.visible = false;
+      this.nextZoneRing.visible = false;
+      this.scene.fog.color.setHex(PALETTE.sky);
+      this.scene.background.setHex(PALETTE.sky);
+      return;
+    }
+
+    const r = Math.max(0.5, storm.radius);
+    this.stormWall.visible = true;
+    this.stormWall.position.set(storm.centre.x, STORM_WALL_HEIGHT / 2 - WALL_H, storm.centre.z);
+    this.stormWall.scale.set(r, 1, r);
+
+    this.stormRing.visible = true;
+    this.stormRing.position.set(storm.centre.x, 0.4, storm.centre.z);
+    this.stormRing.scale.set(r, 1, r);
+
+    const showNext = storm.nextRadius > 0 && storm.nextRadius < storm.radius;
+    this.nextZoneRing.visible = showNext;
+    if (showNext) {
+      this.nextZoneRing.position.set(storm.nextCentre.x, 0.5, storm.nextCentre.z);
+      this.nextZoneRing.scale.set(storm.nextRadius, 1, storm.nextRadius);
+    }
+
+    // §8.4 — being inside the storm must be unmistakable from the world itself, not only
+    // from the HUD. The sky and fog shift, on top of the wall that is already visible.
+    const target = playerInside ? PALETTE.sky : 0x5b2d80;
+    this.scene.fog.color.setHex(target);
+    this.scene.background.setHex(target);
+    this.stormWallMaterial.opacity = playerInside ? 0.22 : 0.34;
+  }
+
+  /**
+   * The player avatar — ITEM_SHOP_SPEC §8.2 requires the equipped outfit to actually
+   * appear in a match, and a third-person camera needs something to look at.
+   *
+   * Built from the outfit's catalog palette, so equipping a different outfit visibly
+   * changes the character. Dimensions derive from the movement capsule, never literals,
+   * so the avatar always matches the collision shape it represents.
+   */
+  _setupAvatar() {
+    const r = MOVEMENT.capsuleRadius;
+    const h = MOVEMENT.standHeight;
+
+    this.avatar = new THREE.Group();
+    this.avatarMaterials = {
+      body: new THREE.MeshLambertMaterial({ color: 0x6b7280 }),
+      trim: new THREE.MeshLambertMaterial({ color: 0xcbd5e1 })
+    };
+
+    const torso = new THREE.Mesh(
+      new THREE.BoxGeometry(r * 2.1, h * 0.42, r * 1.3), this.avatarMaterials.body
+    );
+    torso.position.y = h * 0.62;
+    torso.castShadow = true;
+    this.avatar.add(torso);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(r * 0.62, 16, 12), this.avatarMaterials.trim
+    );
+    head.position.y = h * 0.9;
+    head.castShadow = true;
+    this.avatar.add(head);
+
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Mesh(
+        new THREE.BoxGeometry(r * 0.78, h * 0.42, r * 0.9), this.avatarMaterials.body
+      );
+      leg.position.set(side * r * 0.5, h * 0.21, 0);
+      leg.castShadow = true;
+      this.avatar.add(leg);
+
+      const arm = new THREE.Mesh(
+        new THREE.BoxGeometry(r * 0.55, h * 0.36, r * 0.75), this.avatarMaterials.trim
+      );
+      arm.position.set(side * r * 1.4, h * 0.62, 0);
+      arm.castShadow = true;
+      this.avatar.add(arm);
+    }
+
+    this.avatarGroup = this.avatar;
+    this.scene.add(this.avatar);
+  }
+
+  /** Apply the equipped outfit's palette to the avatar. */
+  setAvatarCosmetics(outfit) {
+    if (!outfit?.preview?.palette) return;
+    const [dark, light] = outfit.preview.palette;
+    this.avatarMaterials.body.color.set(dark);
+    this.avatarMaterials.trim.color.set(light);
+  }
+
+  /**
+   * @param {object} player  PlayerController
+   * @param {boolean} visible  hidden during freefall, where the descent owns the view
+   */
+  updateAvatar(player, visible = true) {
+    if (!this.avatar) return;
+    this.avatar.visible = visible;
+    if (!visible) return;
+
+    this.avatar.position.set(player.position.x, player.position.y, player.position.z);
+    this.avatar.rotation.y = player.yaw;
+    // Crouching squashes the avatar exactly as it squashes the capsule.
+    this.avatar.scale.y = player.height / MOVEMENT.standHeight;
   }
 
   syncCamera(playerCamera) {

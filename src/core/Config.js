@@ -108,8 +108,10 @@ export const MANTLE = Object.freeze({
 /* ══ CAMERA — MASTER_SPEC §7 ═════════════════════════════════════════════════ */
 
 export const CAMERA = Object.freeze({
-  distance: 2.6,
-  shoulderOffsetX: 0.45,
+  // Close over-the-shoulder, but far enough that the avatar does not occlude the
+  // crosshair. Tuned against the rendered view; see MASTER_SPEC §7.
+  distance: 4.0,
+  shoulderOffsetX: 0.8,
   heightAbovebase: WALL_H * RATIO.standHeight * 0.807,  // 1.55 m
   crouchDrop: 0.6,
   pitchMinDeg: -85,

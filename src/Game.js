@@ -399,7 +399,9 @@ export class Game {
       direction: this.aimRay.direction,
       pieceType: this.selectedPiece,
       rotation: this.rotation,
-      grid: this.grid
+      grid: this.grid,
+      // Skip the camera-to-player gap so the target is never a cell behind the character.
+      minDistance: this.camera.distance
     });
   }
 
@@ -797,8 +799,9 @@ export class Game {
     if (!this.inDropPhase) return false;
     const land = (x, z) => ({ x, y: this.terrain.heightAt(x, z), z });
 
+    // Land mid-cell rather than on a grid corner, for the same reason spawnPoint does.
     const target = this.descent.state === 'inTransport'
-      ? land(0, 0)
+      ? land(TILE / 2, TILE / 2)
       : land(this.descent.position.x, this.descent.position.z);
     this.descent.position = { ...target };
     this.descent.state = 'landed';

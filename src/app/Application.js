@@ -178,8 +178,9 @@ export class Application {
     this.scenes.update(dt);
   }
 
+  /** One rendered frame. Menu scenes ignore it; MatchScene draws the world. */
   render(alpha) {
-    this.scenes.render(alpha);
+    this.scenes.frame(alpha);
   }
 
   snapshot() {

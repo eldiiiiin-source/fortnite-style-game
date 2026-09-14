@@ -13,80 +13,108 @@ import {
 const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
 
 const HUD_CSS = `
-#hud { --hud-bg: rgba(10,13,18,0.66); --hud-edge: rgba(255,255,255,0.14);
+.hud { --hud-bg: rgba(10,13,18,0.66); --hud-edge: rgba(255,255,255,0.14);
   font-family: "Segoe UI", system-ui, sans-serif; user-select: none; }
-#hud .panel { background: var(--hud-bg); border: 1px solid var(--hud-edge);
+.hud .panel { background: var(--hud-bg); border: 1px solid var(--hud-edge);
   border-radius: 4px; backdrop-filter: blur(3px); }
 
-#hud .bars { position:absolute; left:50%; bottom:52px; transform:translateX(-50%); width:420px; }
-#hud .bar { height:18px; margin-bottom:5px; border-radius:3px; overflow:hidden; position:relative;
+.hud .bars { position:absolute; left:50%; bottom:52px; transform:translateX(-50%); width:420px; }
+.hud .bar { height:18px; margin-bottom:5px; border-radius:3px; overflow:hidden; position:relative;
   background: var(--hud-bg); border:1px solid var(--hud-edge); }
-#hud .bar > i { display:block; height:100%; width:0; transition: width 90ms linear; }
-#hud .bar > span { position:absolute; right:9px; top:0; line-height:18px; font-size:12px;
+.hud .bar > i { display:block; height:100%; width:0; transition: width 90ms linear; }
+.hud .bar > span { position:absolute; right:9px; top:0; line-height:18px; font-size:12px;
   font-weight:800; letter-spacing:.04em; text-shadow:0 1px 3px #000; color:#fff; }
-#hud .shield > i { background:linear-gradient(180deg,#6ee6f7,#2fbcd6); }
-#hud .health > i { background:linear-gradient(180deg,#ffffff,#c8d2da); }
+.hud .shield > i { background:linear-gradient(180deg,#6ee6f7,#2fbcd6); }
+.hud .health > i { background:linear-gradient(180deg,#ffffff,#c8d2da); }
 
-#hud .mats { position:absolute; right:22px; bottom:214px; display:flex; gap:8px; }
-#hud .mat { padding:5px 11px; font-weight:800; font-size:13px; min-width:46px; text-align:right;
+.hud .mats { position:absolute; right:22px; bottom:214px; display:flex; gap:8px; }
+.hud .mat { padding:5px 11px; font-weight:800; font-size:13px; min-width:46px; text-align:right;
   border-radius:3px; background:var(--hud-bg); border:1px solid var(--hud-edge); }
 
-#hud .buildbar { position:absolute; right:22px; bottom:166px; display:flex; gap:5px; }
-#hud .slot { width:60px; height:42px; display:grid; place-items:center; font-size:10px;
+.hud .buildbar { position:absolute; right:22px; bottom:166px; display:flex; gap:5px; }
+.hud .slot { width:60px; height:42px; display:grid; place-items:center; font-size:10px;
   font-weight:700; letter-spacing:.09em; text-transform:uppercase; opacity:.55;
   border:2px solid transparent; color:#e8eef4; }
-#hud .slot.active { opacity:1; border-color:#fff; transform:translateY(-2px); }
-#hud .slot.poor { color:#ff6b6b; }
+.hud .slot.active { opacity:1; border-color:#fff; transform:translateY(-2px); }
+.hud .slot.poor { color:#ff6b6b; }
 
-#hud .invbar { position:absolute; right:22px; bottom:52px; display:flex; gap:5px; }
-#hud .islot { width:62px; height:62px; display:flex; flex-direction:column; justify-content:space-between;
+.hud .invbar { position:absolute; right:22px; bottom:52px; display:flex; gap:5px; }
+.hud .islot { width:62px; height:62px; display:flex; flex-direction:column; justify-content:space-between;
   padding:4px; font-size:9px; border:2px solid #2b3340; color:#e8eef4; text-align:left; }
-#hud .islot.active { border-color:#fff; transform:translateY(-3px); }
-#hud .islot .nm { font-weight:700; line-height:1.15; }
-#hud .islot .am { font-weight:800; font-size:11px; text-align:right; }
-#hud .islot .key { position:absolute; opacity:.5; font-size:8px; }
+.hud .islot.active { border-color:#fff; transform:translateY(-3px); }
+.hud .islot .nm { font-weight:700; line-height:1.15; }
+.hud .islot .am { font-weight:800; font-size:11px; text-align:right; }
+.hud .islot .key { position:absolute; opacity:.5; font-size:8px; }
 
-#hud .crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+.hud .crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
   width:44px; height:44px; }
-#hud .crosshair i { position:absolute; background:#fff; box-shadow:0 0 2px #000; }
-#hud .hitmarker { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+.hud .crosshair i { position:absolute; background:#fff; box-shadow:0 0 2px #000; }
+.hud .hitmarker { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
   width:26px; height:26px; opacity:0; }
-#hud .hitmarker i { position:absolute; width:9px; height:2px; background:#fff; box-shadow:0 0 2px #000; }
-#hud .hitmarker.show { opacity:1; }
-#hud .hitmarker.head i { background:#ffd54a; }
-#hud .hitmarker.elim i { background:#ff5a5a; }
+.hud .hitmarker i { position:absolute; width:9px; height:2px; background:#fff; box-shadow:0 0 2px #000; }
+.hud .hitmarker.show { opacity:1; }
+.hud .hitmarker.head i { background:#ffd54a; }
+.hud .hitmarker.elim i { background:#ff5a5a; }
 
-#hud .topright { position:absolute; right:22px; top:18px; width:190px; }
-#hud .compass { height:26px; position:relative; overflow:hidden; margin-bottom:6px; }
-#hud .compass .ticks { position:absolute; top:0; height:100%; display:flex; align-items:center;
+.hud .topright { position:absolute; right:22px; top:18px; width:190px; }
+.hud .compass { height:26px; position:relative; overflow:hidden; margin-bottom:6px; }
+.hud .compass .ticks { position:absolute; top:0; height:100%; display:flex; align-items:center;
   font-size:11px; font-weight:800; color:#dfe7ef; }
-#hud .compass .tick { width:52px; text-align:center; }
-#hud .compass .needle { position:absolute; left:50%; top:0; width:2px; height:100%;
+.hud .compass .tick { width:52px; text-align:center; }
+.hud .compass .needle { position:absolute; left:50%; top:0; width:2px; height:100%;
   background:#ffd54a; transform:translateX(-50%); }
-#hud .counts { display:flex; gap:6px; }
-#hud .count { flex:1; padding:5px 8px; font-size:11px; font-weight:700; color:#dfe7ef; }
-#hud .count b { display:block; font-size:16px; color:#fff; }
+.hud .counts { display:flex; gap:6px; }
+.hud .count { flex:1; padding:5px 8px; font-size:11px; font-weight:700; color:#dfe7ef; }
+.hud .count b { display:block; font-size:16px; color:#fff; }
 
-#hud .feed { position:absolute; left:20px; top:18px; width:330px; font-size:11px; }
-#hud .feed div { padding:4px 9px; margin-bottom:3px; color:#e8eef4; }
+.hud .feed { position:absolute; left:20px; top:18px; width:330px; font-size:11px; }
+.hud .feed div { padding:4px 9px; margin-bottom:3px; color:#e8eef4; }
 
-#hud .prompt { position:absolute; left:50%; top:58%; transform:translateX(-50%);
+.hud .prompt { position:absolute; left:50%; top:58%; transform:translateX(-50%);
   padding:7px 16px; font-size:13px; font-weight:700; color:#fff; display:none; }
-#hud .prompt.show { display:block; }
-#hud .prompt b { color:#ffd54a; }
+.hud .prompt.show { display:block; }
+.hud .prompt b { color:#ffd54a; }
 
-#hud .editstate { position:absolute; left:50%; top:63%; transform:translateX(-50%);
+.hud .editstate { position:absolute; left:50%; top:63%; transform:translateX(-50%);
   padding:5px 14px; font-size:11px; font-weight:800; letter-spacing:.12em;
   text-transform:uppercase; color:#4cd94c; display:none; }
-#hud .editstate.show { display:block; }
+.hud .editstate.show { display:block; }
 
-#hud .debug { position:absolute; left:20px; bottom:18px;
+.hud .minimap { margin-top:8px; padding:4px; line-height:0; }
+.hud .minimap canvas { display:block; border-radius:2px; }
+
+.hud .stormbar { position:absolute; left:50%; top:84px; transform:translateX(-50%);
+  display:none; align-items:center; gap:12px; padding:8px 18px; font-size:12px; }
+.hud .stormbar.show { display:flex; }
+.hud .stormbar .phase { font-weight:900; letter-spacing:.12em; text-transform:uppercase;
+  color:#c9a6ff; }
+.hud .stormbar .timer { font-weight:900; font-size:15px; font-variant-numeric:tabular-nums; }
+.hud .stormbar .dmg { color:#ff8b8b; font-weight:800; font-size:11px; }
+.hud .stormbar.shrinking .phase { color:#ff9de0; }
+
+.hud .dropbar { position:absolute; left:50%; top:84px; transform:translateX(-50%);
+  display:none; padding:9px 20px; font-size:12.5px; font-weight:800; letter-spacing:.1em;
+  text-transform:uppercase; }
+.hud .dropbar.show { display:block; }
+.hud .dropbar b { color:var(--hud-accent, #ffd54a); }
+
+.hud .stormwarn { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  display:none; padding:14px 32px; font-size:17px; font-weight:900; letter-spacing:.16em;
+  text-transform:uppercase; color:#ffd0f5; background:rgba(90,20,120,.35);
+  border:1px solid rgba(220,140,255,.5); border-radius:4px; pointer-events:none;
+  animation:warnpulse 1.1s ease-in-out infinite; }
+.hud .stormwarn.show { display:block; }
+@keyframes warnpulse { 50% { opacity:.55; } }
+
+.hud .debug { position:absolute; left:20px; bottom:18px;
   font:11px/1.5 ui-monospace,monospace; opacity:.65; padding:6px 10px; color:#cfd8e3; }
 `;
 
 export class HUD {
   constructor(root = document.getElementById('hud')) {
     this.root = root;
+    // The stylesheet is scoped to .hud, so the HUD styles correctly in any container.
+    this.root?.classList.add('hud');
     this.killFeed = [];
     this._hitmarkerTimer = 0;
     if (!this.root) return;
@@ -107,7 +135,12 @@ export class HUD {
           <div class="count panel">ALIVE<b data-alive>0</b></div>
           <div class="count panel">ELIMS<b data-elims>0</b></div>
         </div>
+        <div class="minimap panel" data-minimap></div>
       </div>
+
+      <div class="stormbar panel" data-stormbar></div>
+      <div class="dropbar panel" data-dropbar></div>
+      <div class="stormwarn" data-stormwarn></div>
 
       <div class="crosshair" data-crosshair>
         <i data-ch="t"></i><i data-ch="b"></i><i data-ch="l"></i><i data-ch="r"></i>
@@ -141,7 +174,9 @@ export class HUD {
       healthFill: q('[data-health-fill]'), healthText: q('[data-health-text]'),
       mats: q('[data-mats]'), buildbar: q('[data-buildbar]'), invbar: q('[data-invbar]'),
       crosshair: q('[data-crosshair]'), hitmarker: q('[data-hitmarker]'),
-      prompt: q('[data-prompt]'), editstate: q('[data-editstate]'), debug: q('[data-debug]')
+      prompt: q('[data-prompt]'), editstate: q('[data-editstate]'), debug: q('[data-debug]'),
+      minimap: q('[data-minimap]'), stormbar: q('[data-stormbar]'),
+      dropbar: q('[data-dropbar]'), stormwarn: q('[data-stormwarn]')
     };
 
     this._buildStatic();
@@ -214,11 +249,56 @@ export class HUD {
       if (this._hitmarkerTimer <= 0) this.el.hitmarker.className = 'hitmarker';
     }
 
+    this._renderStorm(s);
+
     if (s.stats) {
       this.el.debug.textContent =
         `${(1000 / Math.max(s.stats.frameMs, 0.01)).toFixed(0)} fps · ` +
         `sim ${s.stats.simMs.toFixed(2)}ms · pieces ${s.pieceCount ?? 0}`;
     }
+  }
+
+  /** BATTLE_ROYALE_SPEC §8.4 — storm timer, phase, damage rate and warning. */
+  _renderStorm(s) {
+    const storm = s.storm;
+
+    // Drop phase gets its own readout instead of the storm bar.
+    this.el.dropbar.classList.toggle('show', !!s.dropPhase);
+    if (s.dropPhase) {
+      const state = s.descentState;
+      const text = state === 'inTransport'
+        ? 'Press <b>SPACE</b> to jump'
+        : state === 'freefall'
+          ? 'Freefall — <b>SPACE</b> to deploy glider'
+          : state === 'gliding' ? 'Gliding' : 'Landing';
+      this.el.dropbar.innerHTML = text;
+    }
+
+    const active = !!storm && storm.state !== 'idle' && !s.dropPhase;
+    this.el.stormbar.classList.toggle('show', active);
+    this.el.stormbar.classList.toggle('shrinking', active && storm.shrinking);
+    if (active) {
+      const mins = Math.floor(storm.timer / 60);
+      const secs = Math.floor(storm.timer % 60);
+      this.el.stormbar.innerHTML =
+        `<span class="phase">${storm.shrinking ? 'Storm Closing' : storm.phaseName}</span>` +
+        `<span class="timer">${mins}:${String(secs).padStart(2, '0')}</span>` +
+        (storm.damagePerSecond > 0 ? `<span class="dmg">${storm.damagePerSecond} HP/s</span>` : '');
+    }
+
+    // Inside the storm is unmistakable.
+    this.el.stormwarn.classList.toggle('show', !!s.inStorm);
+    if (s.inStorm) this.el.stormwarn.textContent = 'Move to the safe zone';
+  }
+
+  /** Attach the minimap canvas once. */
+  attachMinimap(element) {
+    if (!this.root || !this.el.minimap) return;
+    this.el.minimap.replaceChildren(element);
+  }
+
+  setMinimapVisible(visible) {
+    if (this.el?.minimap) this.el.minimap.style.display = visible ? 'block' : 'none';
   }
 
   _renderInventory(s) {
