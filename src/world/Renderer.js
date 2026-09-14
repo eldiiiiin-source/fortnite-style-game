@@ -11,16 +11,21 @@
  */
 import * as THREE from 'three';
 import {
-  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA, LIGHTING
+  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA, LIGHTING, RARITIES
 } from '../core/Config.js';
 import { solidBoxes, rampSections, coneQuadrants, cellOrigin } from '../building/PieceGeometry.js';
 import { CharacterView } from './CharacterView.js';
+import { MaterialCache, buildRigGroup } from './RigMeshBuilder.js';
+import { buildWeaponRig } from '../cosmetics/WeaponRig.js';
 import { DEFAULT_EQUIPPED } from '../meta/CosmeticCatalog.js';
 
 /** Storm wall height — tall enough to read from the ground at any build height. */
 const STORM_WALL_HEIGHT = WALL_H * 30;
 
 /** MAP_SPEC §10 palette — bright, clean, stylised. */
+/** Scaled to nothing: how an instanced slot is taken out of the world without a rebuild. */
+const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
+
 const PALETTE = Object.freeze({
   sky: 0x9ad2f0,
   skyHorizon: 0xdceffb,
@@ -213,6 +218,8 @@ export class Renderer {
   _setupVegetation() {
     this.floraGroup = new THREE.Group();
     this.scene.add(this.floraGroup);
+    /** Vegetation entry -> the instanced-mesh slots drawing it (§14). */
+    this.instanceRefs = new Map();
 
     const layout = this.terrain.layout?.();
     if (!layout) return;
@@ -229,6 +236,11 @@ export class Renderer {
         place(dummy, entry);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
+        // Remember where each entry's instances live. A tree is several instanced meshes
+        // — trunk and canopy — and harvesting it has to take all of them (§14).
+        const refs = this.instanceRefs.get(entry);
+        if (refs) refs.push({ mesh, index: i });
+        else this.instanceRefs.set(entry, [{ mesh, index: i }]);
       });
       mesh.castShadow = true;
       mesh.receiveShadow = false;
@@ -292,6 +304,82 @@ export class Renderer {
         d.scale.set(bush.scale, bush.scale * 0.72, bush.scale);
       }
     );
+
+    this._setupHarvestables(layout, ground);
+  }
+
+  /**
+   * MASTER_SPEC §14 — the metal harvestables.
+   *
+   * Wood and brick sources ARE vegetation and are already drawn as instances; metal has no
+   * instance to borrow, so it is drawn here. There are a handful of them — one per POI — so
+   * each gets its own small group rather than an instanced mesh.
+   */
+  _setupHarvestables(layout, ground) {
+    this.harvestMeshes = new Map();
+    this.depletedProps = new Set();
+
+    for (const prop of layout.props ?? []) {
+      if (prop.kind !== 'vehicle' && prop.kind !== 'container') continue;
+      const group = new THREE.Group();
+      const container = prop.kind === 'container';
+      const w = TILE * (container ? 0.44 : 0.36);
+      const h = WALL_H * (container ? 0.62 : 0.34);
+      const d = TILE * (container ? 0.9 : 0.72);
+
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshLambertMaterial({ color: container ? 0x5f7a86 : 0x8a5a4a })
+      );
+      body.position.y = h / 2;
+      body.castShadow = true;
+      group.add(body);
+
+      if (container) {
+        // A ribbed lid, so a shipping container is not a plain slab.
+        const cap = new THREE.Mesh(
+          new THREE.BoxGeometry(w * 1.04, h * 0.14, d * 1.02),
+          new THREE.MeshLambertMaterial({ color: 0x4a616b })
+        );
+        cap.position.y = h * 0.97;
+        group.add(cap);
+      } else {
+        // A cabin, so a vehicle reads as a vehicle from across the yard.
+        const cabin = new THREE.Mesh(
+          new THREE.BoxGeometry(w * 0.92, h * 0.7, d * 0.36),
+          new THREE.MeshLambertMaterial({ color: 0x6e7f8c })
+        );
+        cabin.position.set(0, h * 1.2, -d * 0.16);
+        group.add(cabin);
+      }
+
+      group.position.set(prop.x, ground(prop.x, prop.z), prop.z);
+      this.floraGroup.add(group);
+      this.harvestMeshes.set(prop.id, group);
+    }
+  }
+
+  /**
+   * MASTER_SPEC §14 — take exhausted harvestables out of the world.
+   *
+   * Diffed against what has already gone, so a depleted prop costs one pass and then
+   * nothing. An instanced source is zeroed in place rather than rebuilt: the vegetation
+   * layer is a handful of draw calls and it stays that way.
+   */
+  syncHarvestedProps(props) {
+    if (!props || !this.depletedProps) return;
+    for (const prop of props) {
+      if (!prop.depleted || this.depletedProps.has(prop.id)) continue;
+      this.depletedProps.add(prop.id);
+
+      const mesh = this.harvestMeshes.get(prop.id);
+      if (mesh) mesh.visible = false;
+
+      for (const ref of this.instanceRefs.get(prop.source) ?? []) {
+        ref.mesh.setMatrixAt(ref.index, ZERO_MATRIX);
+        ref.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
   }
 
   _buildChunk(cx, cz, resolution = 33) {
@@ -441,6 +529,115 @@ export class Renderer {
       this.buildGroup.add(surface);
       this.surfaceMeshes.set(mat, surface);
     }
+  }
+
+  /* ── world loot — MASTER_SPEC §16, §12.1.1 ───────────────────────────────── */
+
+  /**
+   * Draw the loot that physically exists in the world.
+   *
+   * A weapon pickup is drawn with THE WEAPON'S OWN MODEL — the same `buildWeaponRig` part
+   * list the hand and the inventory icon use (§12.1.1) — so what is on the ground is
+   * recognisably what ends up in your hands. Rarity is carried by a coloured pad beneath
+   * the item rather than by recolouring it, because a weapon's colours are its identity and
+   * a recoloured weapon would read as a different weapon.
+   *
+   * Entities are diffed by id: a pickup that has not changed is never rebuilt.
+   */
+  syncWorldLoot(worldLoot, dt = 0) {
+    if (!worldLoot) return;
+    if (!this.lootGroup) {
+      this.lootGroup = new THREE.Group();
+      this.scene.add(this.lootGroup);
+      this.lootViews = new Map();
+      this.lootMaterials = new MaterialCache();
+      this.lootOwned = [];
+    }
+
+    const live = new Set();
+    for (const entity of worldLoot.entities) {
+      // An opened container has nothing left to offer and stops being drawn; its contents
+      // are already separate pickups in the world (§16.1).
+      if (entity.removed || (entity.kind !== 'pickup' && entity.opened)) continue;
+      live.add(entity.id);
+
+      let view = this.lootViews.get(entity.id);
+      if (!view) {
+        view = this._buildLootView(entity);
+        if (!view) continue;
+        this.lootViews.set(entity.id, view);
+        this.lootGroup.add(view.object);
+      }
+      if (view.spin) {
+        // §16 optional polish — the entity owns the phase, the view only reads it.
+        view.object.rotation.y = entity.spin ?? 0;
+        view.object.position.y = view.baseY
+          + Math.sin((entity.spin ?? 0) * 2) * TILE * 0.012;
+      }
+    }
+
+    for (const [id, view] of [...this.lootViews]) {
+      if (live.has(id)) continue;
+      view.object.removeFromParent();
+      this.lootViews.delete(id);
+    }
+    void dt;
+  }
+
+  /** One loot entity's meshes. Returns null for anything with no shape to draw. */
+  _buildLootView(entity) {
+    const object = new THREE.Group();
+    const lift = TILE * 0.05;
+
+    if (entity.kind === 'pickup') {
+      const item = entity.item;
+      if (item?.kind === 'weapon' && item.weapon) {
+        const rig = buildWeaponRig(item.weapon);
+        const weapon = buildRigGroup(rig, this.lootMaterials, this.lootOwned);
+        // Lying flat, muzzle out: a weapon standing on its butt reads as a prop, not loot.
+        weapon.rotation.set(0, 0, Math.PI / 2);
+        object.add(weapon);
+      } else {
+        // Ammo and consumables are small crates; the rarity pad below carries the tier.
+        const size = TILE * 0.06;
+        object.add(new THREE.Mesh(
+          new THREE.BoxGeometry(size * 1.6, size, size * 1.6),
+          new THREE.MeshLambertMaterial({ color: item?.kind === 'ammo' ? 0x9a8455 : 0x8fb98f })
+        ));
+      }
+      object.add(this._rarityPad(entity.rarityColor ?? RARITIES.common.color));
+      object.position.set(entity.position.x, entity.position.y + lift, entity.position.z);
+      return { object, spin: true, baseY: object.position.y };
+    }
+
+    // Containers — a chest is tall with a lid, an ammo box is low and flat, so the two are
+    // told apart from across a room (§16.1).
+    const chest = entity.kind === 'chest';
+    const w = TILE * (chest ? 0.17 : 0.13);
+    const h = TILE * (chest ? 0.12 : 0.07);
+    const d = TILE * (chest ? 0.11 : 0.10);
+    object.add(new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshLambertMaterial({ color: chest ? 0x8a6b3a : 0x53603f })
+    ));
+    const lidMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 1.04, h * 0.3, d * 1.04),
+      new THREE.MeshLambertMaterial({ color: chest ? 0xd9b45a : 0x6f7d54 })
+    );
+    lidMesh.position.y = h * 0.62;
+    object.add(lidMesh);
+    object.position.set(entity.position.x, entity.position.y + h / 2, entity.position.z);
+    return { object, spin: false, baseY: object.position.y };
+  }
+
+  /** A thin rarity-coloured disc under a pickup — the tier, readable at a glance (§16). */
+  _rarityPad(colour) {
+    const pad = new THREE.Mesh(
+      new THREE.CylinderGeometry(TILE * 0.075, TILE * 0.075, TILE * 0.006, 12),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.55 })
+    );
+    pad.position.y = -TILE * 0.045;
+    return pad;
   }
 
   /**
@@ -748,15 +945,16 @@ export class Renderer {
    * @param {object} player  PlayerController
    * @param {boolean} visible  hidden during freefall, where the descent owns the view
    */
-  updateAvatar(player, visible = true, swingProgress = 1) {
+  updateAvatar(player, visible = true, equipped = null) {
     if (!this.character) return;
     this.character.visible = visible;
     if (!visible) return;
     // Crouching squashes the character exactly as it squashes the capsule.
     this.character.place(player.position, player.yaw, player.height);
-    // Swing progress comes from the pickaxe cooldown, so the animation rides the gameplay
-    // swing rate rather than a clock of its own.
-    this.character.setSwingProgress(swingProgress);
+    // MASTER_SPEC §15.4 — the hand is told what the inventory says, every frame. Swing
+    // progress inside it comes from the pickaxe cooldown, so the animation rides the
+    // gameplay swing rate rather than a clock of its own.
+    if (equipped) this.character.setEquipped(equipped);
   }
 
   syncCamera(playerCamera) {

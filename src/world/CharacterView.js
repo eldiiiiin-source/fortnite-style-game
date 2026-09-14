@@ -9,74 +9,21 @@
  * is not tested and contains no logic beyond translating parts into meshes.
  */
 import * as THREE from 'three';
-import {
-  buildCharacterRig, partColour, PartShape, BodyRegion
-} from '../cosmetics/CharacterRig.js';
+import { buildCharacterRig, BodyRegion } from '../cosmetics/CharacterRig.js';
 import { skinOrFallback } from '../cosmetics/SkinDefinitions.js';
 import { buildToolRig, carryTransform, swingPose, SWING_REST } from '../cosmetics/ToolRig.js';
 import { toolOrFallback } from '../cosmetics/ToolDefinitions.js';
+import { buildWeaponRig, weaponPose } from '../cosmetics/WeaponRig.js';
+import { HeldKind, sameHeld } from '../player/EquippedItem.js';
+import { UNIT, applyPartTransform, MaterialCache } from './RigMeshBuilder.js';
 import { CHARACTER } from '../core/Config.js';
-
-/** Shared geometries: every part is a unit primitive scaled to its size. */
-const UNIT = {
-  box: new THREE.BoxGeometry(1, 1, 1),
-  sphere: new THREE.SphereGeometry(0.5, 14, 10),
-  cone: new THREE.ConeGeometry(0.5, 1, 12),
-  cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 12)
-};
-
-/**
- * A wedge: a box with its front face narrowed, which reads as a visor or a brim rather
- * than another cube. Built once and scaled, like the other primitives.
- */
-function unitWedge() {
-  const g = new THREE.BoxGeometry(1, 1, 1);
-  const pos = g.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    // Taper the +Z face inward on X and Y.
-    if (pos.getZ(i) > 0) {
-      pos.setX(i, pos.getX(i) * 0.72);
-      pos.setY(i, pos.getY(i) * 0.6);
-    }
-  }
-  pos.needsUpdate = true;
-  g.computeVertexNormals();
-  return g;
-}
-UNIT.wedge = unitWedge();
-
-/**
- * A chamfered unit box — SKIN_SPEC §6.5. Corners cut on all three axes so a stack of
- * plates reads as machined parts rather than as a pile of rectangles.
- */
-function unitBevelBox() {
-  const g = new THREE.BoxGeometry(1, 1, 1, 2, 2, 2);
-  const pos = g.attributes.position;
-  const cut = 0.34;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    // Pull the eight corner vertices in along every axis; edge and face vertices stay.
-    const corner = Math.abs(x) > 0.49 && Math.abs(y) > 0.49 && Math.abs(z) > 0.49;
-    if (corner) {
-      pos.setX(i, x * (1 - cut));
-      pos.setY(i, y * (1 - cut));
-      pos.setZ(i, z * (1 - cut));
-    }
-  }
-  pos.needsUpdate = true;
-  g.computeVertexNormals();
-  return g;
-}
-UNIT.bevelBox = unitBevelBox();
 
 export class CharacterView {
   constructor() {
     this.group = new THREE.Group();
     this.skin = null;
     this.rig = null;
-    this.materials = new Map();   // colour+glow key -> MeshLambertMaterial
+    this.materials = new MaterialCache();
     this.parts = new Map();       // part id -> Mesh
     this.ownedGeometries = [];    // per-part geometries this view must dispose
 
@@ -86,15 +33,23 @@ export class CharacterView {
     this.armGroup = new THREE.Group();
     this.group.add(this.armGroup);
 
-    this.toolGroup = new THREE.Group();
-    this.armGroup.add(this.toolGroup);
+    // MASTER_SPEC §15.4 — THE hand attachment. There is exactly one, and equipping anything
+    // replaces its contents wholesale, so two held items cannot coexist even for a frame.
+    // Nothing outside this class ever adds a child to it.
+    this.heldGroup = new THREE.Group();
+    this.armGroup.add(this.heldGroup);
+
+    /** The harvesting-tool COSMETIC — which pickaxe model to build when one is held. */
     this.tool = null;
+    /** What is actually in the hand right now, as resolved by `EquippedItem.js`. */
+    this.held = { kind: HeldKind.NONE, id: null, category: null };
 
     // Carry pose in rig space, and the tool's own carry rotation. The swing is applied as
     // an offset from these, so progress 0 and progress 1 land back on the approved pose.
     this.shoulder = { x: 0, y: 0, z: 0 };
     this.carry = null;
     this.swing = SWING_REST;
+    this.adsProgress = 0;
   }
 
   get object3D() {
@@ -110,7 +65,7 @@ export class CharacterView {
     const skin = skinOrFallback(id);
     if (this.skin?.id === skin.id) return;
 
-    const heldTool = this.tool;
+    const wasHeld = { ...this.held };
     this._clear();
     this.skin = skin;
     this.rig = buildCharacterRig(skin);
@@ -123,28 +78,80 @@ export class CharacterView {
 
     this._build(this.rig.parts, skin, this.group, '');
 
-    // Materials are shared per view and were just disposed, so the held tool is rebuilt
-    // against the new material set rather than left pointing at freed ones.
-    if (heldTool) {
-      this.tool = null;
-      this.setTool(heldTool);
-    }
-    this._placeToolInHand();
+    // Materials are shared per view and were just disposed, so whatever is in the hand is
+    // rebuilt against the new material set rather than left pointing at freed ones.
+    this.held = { kind: HeldKind.NONE, id: null, category: null };
+    this._buildHeld(wasHeld);
   }
 
   /**
-   * Equip a harvesting tool, held in the right hand (SKIN_SPEC §11.6).
+   * Choose WHICH harvesting tool model is used when the pickaxe is held (SKIN_SPEC §11.6).
+   * This is a cosmetic choice, not an equip: it does not put anything in the hand.
    * Accepts a tool, a tool id, or a catalog cosmetic.
    */
   setTool(toolOrCosmetic) {
     const id = typeof toolOrCosmetic === 'string' ? toolOrCosmetic : toolOrCosmetic?.id;
     const tool = toolOrFallback(id);
     if (this.tool?.id === tool.id) return;
-
-    for (const mesh of [...this.toolGroup.children]) mesh.removeFromParent();
     this.tool = tool;
-    this._build(buildToolRig(tool).parts, tool, this.toolGroup, 'tool:');
-    this._placeToolInHand();
+    // Rebuild only if the pickaxe is what is currently in the hand.
+    if (this.held.kind === HeldKind.PICKAXE) {
+      this._buildHeld({ ...this.held, id: tool.id }, { force: true });
+    }
+  }
+
+  /**
+   * MASTER_SPEC §15.4 — THE equipped-item entry point.
+   *
+   * Takes the resolved view from `EquippedItem.equippedView` and makes the hand match it.
+   * This view holds no equipped state of its own: it is told what the inventory says, every
+   * frame, so a held item cannot go stale and two cannot coexist.
+   *
+   * @param {{kind:string, id:string|null, category:string|null,
+   *          swingProgress:number, adsProgress:number}} view
+   */
+  setEquipped(view) {
+    const next = view ?? { kind: HeldKind.NONE, id: null, category: null };
+    // Both progresses are read BEFORE the pose is applied, and the pose is applied on every
+    // call — not only when the held item changes. Applying it only on a change left the aim
+    // pose frozen at whatever it was when the weapon was drawn, so raising the sights moved
+    // nothing at all.
+    this.adsProgress = next.adsProgress ?? 0;
+    const progress = next.swingProgress ?? 1;
+    this.swing = progress >= 1 || !Number.isFinite(progress) ? SWING_REST : swingPose(progress);
+    this._buildHeld(next);
+    this._applyHeld();
+  }
+
+  /**
+   * Replace the hand's contents. Everything currently in the hand is removed FIRST and
+   * unconditionally, which is the structural reason exactly one item can ever be visible.
+   */
+  _buildHeld(next, { force = false } = {}) {
+    const target = next?.kind ? next : { kind: HeldKind.NONE, id: null, category: null };
+    if (!force && sameHeld(this.held, target)) return;
+
+    for (const mesh of [...this.heldGroup.children]) mesh.removeFromParent();
+    // Drop the outgoing item's part entries too, or the map grows by a full rig on every
+    // weapon switch and `_clear` ends up disposing meshes that left the scene long ago.
+    for (const key of [...this.parts.keys()]) {
+      if (key.startsWith('held:')) this.parts.delete(key);
+    }
+    this.held = { kind: target.kind, id: target.id ?? null, category: target.category ?? null };
+    this.carry = null;
+
+    if (target.kind === HeldKind.PICKAXE) {
+      const tool = toolOrFallback(target.id ?? this.tool?.id);
+      this.tool = tool;
+      this.held.id = tool.id;
+      this._build(buildToolRig(tool).parts, tool, this.heldGroup, 'held:');
+      this._placeToolInHand();
+    } else if (target.kind === HeldKind.WEAPON) {
+      const rig = buildWeaponRig(target.category ?? target.id);
+      this.held.category = rig.category;
+      this._build(rig.parts, rig, this.heldGroup, 'held:');
+    }
+    this._applyHeld();
   }
 
   /**
@@ -155,61 +162,77 @@ export class CharacterView {
    *
    * The pose itself is solved by `carryTransform` — pure geometry, tested in Node — so this
    * file stays a translator, per its own contract above.
-   *
-   * This is the ONLY transform the view gives a tool: there is no swing animation in the
-   * view layer, so the same pose holds through idle, walking, sprinting and crouching.
-   * Swinging is gameplay (PICKAXE in Config) plus an audio cue, and nothing here touches it.
    */
   _placeToolInHand() {
     const m = this.rig?.metrics;
     if (!m) return;
-
     this.carry = carryTransform(m, this.tool?.headScale ?? 1);
-    this._applySwing();
+    this._applyHeld();
   }
 
   /**
-   * Set how far through a swing the tool is (SKIN_SPEC §11.7).
+   * Set how far through a swing the harvesting tool is (SKIN_SPEC §11.7).
    *
    * `progress` is `Pickaxe.swingProgress` — a read of the gameplay cooldown. Pass 1, or
-   * nothing, for the idle carry pose.
+   * nothing, for the idle carry pose. A weapon ignores it entirely (§12.1.2).
    */
   setSwingProgress(progress = 1) {
     this.swing = progress >= 1 || !Number.isFinite(progress) ? SWING_REST : swingPose(progress);
-    this._applySwing();
+    this._applyHeld();
   }
 
   /**
-   * Lay the swing over the carry pose.
+   * Put the held item where its own pose says it goes.
    *
-   * At rest the offsets are all zero, so the tool lands on exactly the transform
-   * `carryTransform` returns — the approved carry pose, unmodified.
+   * One method for both, because there is one hand. The pickaxe lays its swing over the
+   * approved carry pose (at rest the offsets are all zero, so it lands on exactly the
+   * transform `carryTransform` returns); a weapon takes the hip/ADS pose from `weaponPose`.
+   * Neither can reach the other's pose, because the branch is on what is held.
    */
-  _applySwing() {
-    if (!this.carry) return;
-    const { position, rotation } = this.carry;
-    const s = this.swing;
+  _applyHeld() {
+    const metrics = this.rig?.metrics;
 
-    this.armGroup.rotation.set(s.arm.x, s.arm.y, s.arm.z);
-    this.toolGroup.position.set(
-      position.x - this.shoulder.x,
-      position.y - this.shoulder.y,
-      position.z - this.shoulder.z
-    );
-    this.toolGroup.rotation.set(rotation.x + s.toolPitch, rotation.y, rotation.z);
+    if (this.held.kind === HeldKind.PICKAXE && this.carry) {
+      const { position, rotation } = this.carry;
+      const s = this.swing;
+      this.armGroup.rotation.set(s.arm.x, s.arm.y, s.arm.z);
+      this.heldGroup.position.set(
+        position.x - this.shoulder.x,
+        position.y - this.shoulder.y,
+        position.z - this.shoulder.z
+      );
+      this.heldGroup.rotation.set(rotation.x + s.toolPitch, rotation.y, rotation.z);
+      return;
+    }
+
+    if (this.held.kind === HeldKind.WEAPON && metrics) {
+      const pose = weaponPose(metrics, this.adsProgress);
+      this.armGroup.rotation.set(pose.arm.x, pose.arm.y, pose.arm.z);
+      this.heldGroup.position.set(pose.position.x, pose.position.y, pose.position.z);
+      this.heldGroup.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
+      return;
+    }
+
+    // Empty hand: the arm hangs at its rig pose. Nothing is attached to rotate.
+    this.armGroup.rotation.set(0, 0, 0);
   }
 
   _build(parts, owner, parent, idPrefix) {
     for (const part of parts) {
       const geometry = part.bevel ? UNIT.bevelBox : (UNIT[part.shape] ?? UNIT.box);
-      const mesh = new THREE.Mesh(geometry, this._material(owner, part));
+      const mesh = new THREE.Mesh(geometry, this.materials.get(owner, part));
       applyPartTransform(mesh, part, this.ownedGeometries);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
       // Everything on the right arm — the limb itself and any cosmetic pad or bracer on it
       // — rides the arm group, so a swing takes the whole sleeve with it. Parts are built in
       // RIG space, so rebase onto the pivot to leave them exactly where they were.
-      if (parent === this.group && part.region === BodyRegion.ARM_R) {
+      //
+      // The region is the part's TAG: `RigPrimitives.box(id, tag, role, …)` takes the
+      // BodyRegion as its tag, and there is no `part.region` field at all. Testing for one
+      // matched nothing, so every arm mesh stayed on the character and the shoulder pivot
+      // animated the held item alone — the tool swung out of a hand that never moved.
+      if (parent === this.group && part.tag === BodyRegion.ARM_R) {
         mesh.position.set(
           mesh.position.x - this.shoulder.x,
           mesh.position.y - this.shoulder.y,
@@ -223,33 +246,13 @@ export class CharacterView {
     }
   }
 
-  _material(owner, part) {
-    const colour = partColour(owner, part);
-    // A lens and a glowing bone share a colour but not a material, so the key carries
-    // both. Without this the first one built would decide how the other looked.
-    const key = `${colour}|${part.glow ? 'glow' : part.role === 'visor' ? 'lens' : 'flat'}`;
-    let mat = this.materials.get(key);
-    if (!mat) {
-      // `visor` reads as a lens rather than paint; `glow` is self-lit geometry. Both are
-      // material choices, never rarity effects — no gameplay tell (SKIN_SPEC §8).
-      const lift = part.glow ? 0.85 : part.role === 'visor' ? 0.28 : 0;
-      mat = new THREE.MeshLambertMaterial({
-        color: colour,
-        emissive: lift > 0 ? new THREE.Color(colour).multiplyScalar(lift) : 0x000000
-      });
-      this.materials.set(key, mat);
-    }
-    return mat;
-  }
-
   _clear() {
     for (const mesh of this.parts.values()) mesh.removeFromParent();
     this.parts.clear();
     // Only geometries this view built — the shared UNIT primitives outlive every view.
     for (const geo of this.ownedGeometries) geo.dispose();
     this.ownedGeometries.length = 0;
-    for (const mat of this.materials.values()) mat.dispose();
-    this.materials.clear();
+    this.materials.dispose();
   }
 
   /**
@@ -280,36 +283,4 @@ export class CharacterView {
     this._clear();
     this.group.removeFromParent();
   }
-}
-
-/**
- * Scale and position one unit primitive to match a rig part. Any geometry built here is
- * pushed to `owned` so the view can dispose it — the shared UNIT primitives never are.
- */
-function applyPartTransform(mesh, part, owned) {
-  switch (part.shape) {
-    case PartShape.SPHERE:
-      mesh.scale.setScalar(part.radius * 2);
-      break;
-    case PartShape.CONE:
-      mesh.scale.set(part.radius * 2, part.height, part.radius * 2);
-      break;
-    case PartShape.CYLINDER: {
-      const top = part.radiusTop ?? part.radius;
-      if (top === part.radius) {
-        // Untapered: the shared unit cylinder scales to fit.
-        mesh.scale.set(part.radius * 2, part.height, part.radius * 2);
-      } else {
-        // Tapered: needs its own geometry, built at true radii so only height scales.
-        mesh.geometry = new THREE.CylinderGeometry(top, part.radius, 1, 12);
-        owned.push(mesh.geometry);
-        mesh.scale.set(1, part.height, 1);
-      }
-      break;
-    }
-    default:
-      mesh.scale.set(part.size.x, part.size.y, part.size.z);
-  }
-  mesh.position.set(part.pos.x, part.pos.y, part.pos.z);
-  if (part.rot) mesh.rotation.set(part.rot.x, part.rot.y, part.rot.z);
 }

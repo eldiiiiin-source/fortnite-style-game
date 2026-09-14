@@ -10,7 +10,9 @@
  */
 import { el, mount, formatNumber } from './dom.js';
 import { ADMIN, BOT_DIFFICULTY, TEST_LOADOUTS, MATCH } from '../meta/MetaConfig.js';
-import { WEAPONS, RARITY_ORDER, CONSUMABLES, MATERIAL_CAP } from '../core/Config.js';
+import {
+  WEAPONS, RARITY_ORDER, CONSUMABLES, MATERIAL_CAP, MATERIAL_ORDER, MATERIALS, DEV_ACTIONS
+} from '../core/Config.js';
 import { COSMETICS, CATEGORY_LABELS } from '../meta/CosmeticCatalog.js';
 import { BotState } from '../world/Bot.js';
 
@@ -102,19 +104,43 @@ export class AdminPanel {
     // §1.4 — a persistent indicator so test footage is never mistaken for normal play.
     parent.appendChild(el('div.dev-badge', { text: 'DEV MODE' }));
 
+    // §1.2 / MASTER_SPEC §4.5 — one keydown listener, and it carries NO key code of its
+    // own. Every key is resolved through the game's binding table at the moment it arrives,
+    // so these are rebindable in Settings, persisted, and conflict-checked exactly like
+    // `jump` is. The panel used to match `ADMIN.toggleKey` and a hard-coded 'Backquote',
+    // which put F8 and ` outside the binding system altogether.
     this._onKey = (e) => {
-      if (e.code === ADMIN.toggleKey) { e.preventDefault(); this.toggle(); }
-      else if (e.code === 'Backquote') { e.preventDefault(); this.console.toggle(); }
-      else if (e.code === ADMIN.collisionDebugKey) {
-        e.preventDefault(); this.admin.toggleDebugVisual('collision');
-      } else if (e.code === ADMIN.aiDebugKey) {
-        e.preventDefault(); this.admin.toggleDebugVisual('botTarget');
-      } else if (e.code === ADMIN.performanceKey) {
-        e.preventDefault(); this.category = 'performance'; this.setOpen(true);
-      }
+      const action = this.actionFor(e.code);
+      if (!action) return;
+      e.preventDefault();
+      this.runAction(action);
     };
     window.addEventListener('keydown', this._onKey);
     return true;
+  }
+
+  /** Which developer action, if any, the pressed code is bound to right now. */
+  actionFor(code) {
+    const bindings = this.app.settings?.bindings ?? {};
+    return DEV_ACTIONS.find((action) => bindings[action] === code) ?? null;
+  }
+
+  /**
+   * Run one developer action. The key path and any future UI path both come through here,
+   * so there is one behaviour per action rather than one per caller.
+   */
+  runAction(action) {
+    switch (action) {
+      case ADMIN.toggleAction: this.toggle(); return true;
+      case ADMIN.consoleAction: this.console.toggle(); return true;
+      case ADMIN.collisionDebugAction: this.admin.toggleDebugVisual('collision'); return true;
+      case ADMIN.aiDebugAction: this.admin.toggleDebugVisual('botTarget'); return true;
+      case ADMIN.performanceAction:
+        this.category = 'performance';
+        this.setOpen(true);
+        return true;
+      default: return false;
+    }
   }
 
   toggle() { this.setOpen(!this.open); }
@@ -216,8 +242,20 @@ export class AdminPanel {
         ...Object.keys(CONSUMABLES).map((id) =>
           this._btn(CONSUMABLES[id].name, () => this._run(() => a.giveConsumable(id))))
       ),
+      // §4.4 — per-material grants, each one click.
       el('h4', { text: 'Materials' }),
       this._row(
+        ...MATERIAL_ORDER.map((m) => this._btn(
+          `Give ${ADMIN.materialGrant} ${MATERIALS[m].name}`,
+          () => this._run(() => a.giveMaterials(m, ADMIN.materialGrant),
+            `+${ADMIN.materialGrant} ${MATERIALS[m].name}`)
+        )),
+        this._btn(`Give ${ADMIN.materialGrant} All`, () => this._run(
+          () => a.giveMaterials('all', ADMIN.materialGrant), `+${ADMIN.materialGrant} all`))
+      ),
+      this._row(
+        this._btn('Infinite Materials', () => this._run(() => a.toggleInfiniteMaterials()),
+          { active: a.flags.infiniteMaterials }),
         this._btn(`Max (${MATERIAL_CAP})`, () => this._run(() => a.giveMaxMaterials())),
         this._btn('Clear Inventory', () => this._run(() => a.clearInventory()), { danger: true })
       )
@@ -507,8 +545,15 @@ export class CommandConsole {
       placeholder: 'Type a command — "help" for a list',
       on: {
         keydown: (e) => {
-          if (e.code === 'Enter') { this._submit(); e.preventDefault(); }
-          else if (e.code === 'Escape') { this.setOpen(false); e.preventDefault(); }
+          // The console's own bind closes it. Without this the key that opens the console
+          // cannot close it: the focused input stops the event before the window listener
+          // that owns the bind ever sees it, so the console can only be dismissed with
+          // Escape — and while it holds focus it swallows every other key too.
+          const closeCode = this.app.settings?.bindings?.[ADMIN.consoleAction];
+          if (e.code === closeCode || e.code === 'Escape') {
+            this.setOpen(false);
+            e.preventDefault();
+          } else if (e.code === 'Enter') { this._submit(); e.preventDefault(); }
           else if (e.code === 'ArrowUp') { this._recall(-1); e.preventDefault(); }
           else if (e.code === 'ArrowDown') { this._recall(1); e.preventDefault(); }
           e.stopPropagation();
@@ -571,7 +616,12 @@ export class CommandConsole {
         const [what, ...rest] = args;
         if (what === 'weapon') return a.giveWeapon(rest[0], rest[1] ?? 'common');
         if (what === 'ammo') return a.giveAmmo(rest[0] ?? 'all');
-        if (what === 'materials') return a.setMaterials(Number(rest[0]) || MATERIAL_CAP);
+        if (what === 'materials') {
+          // `give materials wood 500` grants one; `give materials 500` sets all three.
+          return MATERIAL_ORDER.includes(rest[0])
+            ? a.giveMaterials(rest[0], Number(rest[1]) || ADMIN.materialGrant)
+            : a.setMaterials(Number(rest[0]) || MATERIAL_CAP);
+        }
         if (what === 'item') return a.giveConsumable(rest[0]);
         return { ok: false, reason: 'usage: give weapon|ammo|materials|item' };
       },

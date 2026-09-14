@@ -17,6 +17,7 @@ import { BuildPiece } from '../../building/BuildPiece.js';
 import { solidBoxes, wallBoxes, floorBoxes } from '../../building/PieceGeometry.js';
 import { TILE } from '../../core/Config.js';
 import { WORLD } from '../../core/Config.js';
+import { Events } from '../../core/EventBus.js';
 
 export class MatchScene extends Scene {
   constructor(app, ui) {
@@ -64,7 +65,12 @@ export class MatchScene extends Scene {
     // Feedback events — §13.1 requires these to be immediate.
     this._off = [
       this.app.bus.on('weapon:hit', (e) => this.hud.showHitmarker(e)),
-      this.app.bus.on('match:participantEliminated', (e) => this._onElimination(e))
+      this.app.bus.on('match:participantEliminated', (e) => this._onElimination(e)),
+      // §18.3 — harvest feedback, driven by the event rather than polled off the counts.
+      // Only the human's gains: a bot harvesting across the map is not the player's news.
+      this.app.bus.on(Events.MATERIAL_GAINED, (e) => {
+        if (e.playerId === game.player.id) this.hud.showMaterialGain(e.type, e.amount);
+      })
     ];
   }
 
@@ -100,9 +106,11 @@ export class MatchScene extends Scene {
 
     this.renderer.syncCamera(game.camera);
     // Hidden while falling: the descent controls the position and the body would clip.
-    this.renderer.updateAvatar(game.player, !game.inDropPhase, game.pickaxeSwingProgress);
+    this.renderer.updateAvatar(game.player, !game.inDropPhase, game.equippedView);
     this.renderer.updateStreaming(game.player.position);
     this.renderer.syncBuildGrid(game.grid);
+    this.renderer.syncWorldLoot(game.worldLoot);
+    this.renderer.syncHarvestedProps(game.props);
 
     const inStorm = game.storm.state !== 'idle'
       && !game.storm.isInside(game.player.position.x, game.player.position.z);

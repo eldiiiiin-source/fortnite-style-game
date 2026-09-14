@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.1.0 |
+| Version | 1.2.0 |
 | Owner | eldin.omerhodzic@icloud.com |
 | Supersedes | Baseline v0.1.0 (temporary placeholder, now void) |
 | Companion | `docs/MAP_SPEC.md`, `references/map/02-chapter2-season1-references.md` |
@@ -85,8 +85,14 @@ wheel down are independently bindable.**
 
 `moveForward`, `moveBackward`, `moveLeft`, `moveRight`, `jump`, `crouch`, `sprint`,
 `interact`, `fire`, `aim`, `reload`, `pickaxe`, `weaponSlot1`–`weaponSlot5`, `wall`,
-`floor`, `ramp`, `cone`, `edit`, `confirmEdit`, `resetEdit`, `inventory`, `map`,
-`settings`.
+`floor`, `ramp`, `cone`, `cycleMaterial`, `edit`, `confirmEdit`, `resetEdit`, `inventory`,
+`map`, `settings`.
+
+Developer actions are bindable through the SAME system, never through a listener of their
+own: `toggleAdminMenu`, `toggleDevConsole`, `toggleCollisionDebug`, `toggleAiDebug`,
+`togglePerformancePanel`. They are inert unless `DEV_MODE` is on (`ADMIN_PANEL_SPEC` §1),
+but they occupy the binding table at all times so a conflict with a gameplay bind is
+detected rather than discovered in play.
 
 ### 4.2 Required input options [OWNER]
 
@@ -117,6 +123,26 @@ wheel down are independently bindable.**
 | Pickaxe | `1` | Interact | `E` |
 | Weapon slots 1–5 | `1`–`5` | Map | `M` |
 | Inventory | `Tab` | Settings | `Esc` |
+| **Cycle build material** | **`X`** | | |
+
+Developer defaults [PROV], all `DEV_MODE`-only and none sharing a key with a gameplay bind:
+
+| Action | Default | Action | Default |
+| --- | --- | --- | --- |
+| `toggleAdminMenu` | `F8` | `toggleCollisionDebug` | `F10` |
+| `toggleDevConsole` | `F9` | `toggleAiDebug` | `F11` |
+| `togglePerformancePanel` | `F6` | | |
+
+No developer action takes `Backquote`. `` ` `` is free for the player to bind to any
+gameplay action, including `pickaxe`.
+
+### 4.5 One binding table [OWNER]
+
+There is exactly one binding table and exactly one place a key is resolved to an action.
+A system that wants a key asks the binding table for it; no system registers a key listener
+carrying a key code of its own. This holds for developer tools as much as for movement:
+the admin menu and the developer console are bound, rebound, persisted, listed in Settings
+and conflict-checked identically to `jump`.
 
 ## 5. Player movement [OWNER]
 
@@ -427,6 +453,17 @@ Placeholder material visuals are acceptable while mechanics are correct.
 
 Material cap 500 each [PROV].
 
+#### 9.4.1 Material selection [OWNER]
+
+The player carries all three counts at once and builds with ONE selected material at a
+time. `cycleMaterial` steps wood → brick → metal → wood. The selection is visible on the
+HUD at all times (§18.2), and placement spends `BUILD.cost` of the SELECTED material from
+the player's own harvested stock — there is no free material and no fallback to another
+material when the selected one is short. A placement the player cannot afford is refused,
+not silently switched.
+
+Materials come from harvesting (§14): the player begins a match with zero of each.
+
 ### 9.5 Build health and damage [OWNER]
 
 Structures have health, receive weapon damage, receive pickaxe damage, are destroyable, and
@@ -686,6 +723,40 @@ Common rarity. Every value here is provisional and expected to be retuned.
 
 Ammo types: light, medium, heavy, shells, rockets.
 
+### 12.1.1 Weapon visual representation [OWNER]
+
+Every weapon category has an actual model — a low-poly built form, never a coloured block
+and never an invisible weapon. The model is built from the shared rig vocabulary
+(`SKIN_SPEC` §3.3) so one shape definition serves all three places a weapon is seen:
+
+| Where | Requirement |
+| --- | --- |
+| World pickup | The weapon's own model lies in the world, tinted by rarity (§16) |
+| Held, third person | The same model, in the character's primary hand (§12.1.2) |
+| Inventory slot | The same model, drawn as the slot's icon |
+
+Required silhouettes, each distinguishable at a glance: **assault rifle** (long barrel,
+box magazine, stock), **shotgun** (heavy tube barrel under a wide receiver, short stock),
+**SMG** (short barrel, long curved magazine, compact body), **pistol** (short slide, no
+stock), **sniper** (longest barrel, scope, long stock), **utility/launcher** (wide tube).
+
+Dimensions are ratios of the player capsule, never absolute lengths, so a retune of the
+build module rescales weapons with their wielder.
+
+### 12.1.2 Weapon poses [OWNER]
+
+A held weapon is gripped in the **primary hand** with the **muzzle pointing forward**, away
+from the character. It is never held sideways, never floating free of the hand, and never
+intersecting the torso.
+
+Two poses per weapon, interpolated by the existing ADS progress (§12.4):
+
+- **Hip** — carried at the side, muzzle forward and slightly down.
+- **ADS** — raised to the aim line, muzzle level, drawn in toward the centre.
+
+The pickaxe is a **melee** tool and keeps its own separate carry pose and swing animation
+(`SKIN_SPEC` §11.6, §11.7). Weapon poses never touch it.
+
 ### 12.2 Weapon firing [OWNER]
 
 Fire must feel **immediate**. On trigger, all of these happen **instantly**: fire event,
@@ -768,7 +839,14 @@ where applicable, impact feedback, swing sound, impact sound.
 | Damage to players | 20 | [PROV] |
 | Harvest per swing | 12 wood / 14 brick / 12 metal | [PROV] |
 
-The pickaxe occupies its own slot, separate from the five combat slots (§15).
+The pickaxe occupies its own slot, separate from the five combat slots (§15). Its carry
+pose and swing animation are its own (`SKIN_SPEC` §11.6, §11.7) and are not shared with,
+or affected by, the weapon poses of §12.1.2.
+
+Harvestable world objects carry a material category and a total yield. Every category is
+represented in the world: **wood** (trees), **brick** (rock and stone), **metal** (vehicles,
+containers and yard metal). A harvested object is depleted when its total is exhausted, and
+a depleted object stops yielding and stops being a target.
 
 ## 15. Inventory [OWNER]
 
@@ -785,6 +863,23 @@ replace occupied slots when appropriate.
 **Inventory operations must never randomly delete items.** Every operation is total: an
 item leaving a slot is either placed in another slot or dropped into the world as a
 pickup. Asserted by test.
+
+### 15.4 Equipped-item visual authority [OWNER]
+
+**Exactly one held item is visible at any moment**, and which one is decided by the
+inventory and by nothing else:
+
+| Inventory state | Visible in hand |
+| --- | --- |
+| Pickaxe equipped | The equipped harvesting tool |
+| Combat slot holding a weapon | That weapon |
+| Combat slot empty, or holding a non-weapon | Nothing |
+
+There is ONE equipped-item renderer. It owns a single hand attachment; equipping anything
+replaces that attachment's contents wholesale, so two held items cannot coexist even
+transiently. No other system attaches anything to the hand. The renderer holds no equipped
+state of its own: it is told, every frame, what the inventory says, and a stale visual is
+therefore impossible rather than merely unlikely.
 
 ## 16. Loot [OWNER]
 
@@ -849,6 +944,31 @@ material, minimap, **compass**, **player count**, **elimination count**, kill fe
 Updates happen **immediately** on state change: health, shield, ammo, weapon swap, material
 use, elimination, inventory reorder, build piece selection. Event-driven, never polled on a
 delay.
+
+A bar reflects its value on the frame the value changes. No easing, no tween, no transition
+on the fill: a hit that takes 40 HP shows 40 HP gone that frame.
+
+### 18.2 Vitals and materials readout [OWNER]
+
+Health and shield read as the genre reads them, so a glance costs nothing:
+
+| Bar | Colour | Marker |
+| --- | --- | --- |
+| Health | **Green** `#3ad64a` → `#1f9c2c` | [PROV] |
+| Shield | **Blue** `#4aa8ff` → `#1f6fd6` | [PROV] |
+
+Both sit in the **bottom** region of the screen, **horizontal**, shield stacked directly
+above health, each showing its **numeric value** as well as its fill. A depleted shield
+shows an empty bar, never a hidden one.
+
+The three material counts sit beside them, each in its material colour, and the **selected**
+build material (§9.4.1) is visibly marked as selected.
+
+### 18.3 Material gain feedback [OWNER]
+
+Harvesting shows what was gained, on the frame it is gained: a short-lived `+12 Wood`
+readout at the materials panel, in that material's colour, driven by the material-gained
+event and never by a poll. Repeated swings stack up rather than replacing one another.
 
 ## 19. Settings [OWNER]
 
@@ -1006,6 +1126,7 @@ or derived. Listed highest-impact first.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.2.0 | 2026-09-14 | Core playability correction. §4.1/§4.4/§4.5: developer actions (`toggleAdminMenu`, `toggleDevConsole`, the three debug toggles) become ordinary bindable actions in the one binding table; `Backquote` is freed for gameplay; adds `cycleMaterial`. §9.4.1: material selection and spending from harvested stock. §12.1.1/§12.1.2: weapon models and hip/ADS poses. §14: harvestable categories. §15.4: one equipped-item renderer, exactly one held item visible. §18.1/§18.2/§18.3: green health, blue shield, untweened bars, selected-material marking, material-gain feedback. |
 | 1.1.0 | 2026-09-14 | Adds §9.5.1: structural integrity runs live, via dirty-region support propagation rather than a per-frame world scan. Unifies the destruction path so every cause removes the piece from the grid. Adds the ramp-landing support relationship and a ground-contact tolerance. |
 | 1.0.0 | 2026-09-13 | Replaced the placeholder baseline with the owner's authoritative specification. Key corrections: per-type edit grids (floor 2×2, cone 2×2, ramp 3×2), edited collision as a first-class system, five-slot inventory with a separate pickaxe, BRICK replacing stone, shared camera aim ray, placement queue replacing input-dropping rate limits, per-pellet shotgun resolution, recoil and equip time, world loot entities, settings, audio, bots. |
 | 0.1.0 | 2026-09-13 | Initial baseline placeholder. Void. |

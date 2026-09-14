@@ -7,7 +7,7 @@
  * Persisted to localStorage when available. Every read is guarded — storage can be
  * absent, full, or disabled, and the game must still start with defaults.
  */
-import { DEFAULT_BINDINGS, CAMERA } from './Config.js';
+import { DEFAULT_BINDINGS, BIND_CONFLICT_EXEMPT, CAMERA } from './Config.js';
 
 const STORAGE_KEY = 'settings.v1';
 
@@ -164,8 +164,14 @@ export class Settings {
   rebind(action, code, { force = false } = {}) {
     if (!(action in this.bindings)) return { ok: false, conflicts: [] };
 
+    // Honour the same exemptions `Input` does (§4.5). Without this the settings screen
+    // reported a conflict for pairs the game deliberately shares — pickaxe with slot 1,
+    // fire with confirm-edit — and refused a bind the simulation handles perfectly well.
+    const exempt = new Set(
+      BIND_CONFLICT_EXEMPT.filter((pair) => pair.includes(action)).flat()
+    );
     const conflicts = Object.entries(this.bindings)
-      .filter(([other, bound]) => other !== action && bound === code)
+      .filter(([other, bound]) => other !== action && bound === code && !exempt.has(other))
       .map(([other]) => other);
 
     if (conflicts.length > 0 && !force) return { ok: false, conflicts };

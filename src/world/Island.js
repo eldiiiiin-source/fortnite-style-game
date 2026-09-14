@@ -627,13 +627,23 @@ function buildLayout(island) {
   // Harvestable props: a readable subset of the vegetation, plus yard metal. Keeping the
   // harvestable set smaller than the visual set is deliberate — every tree being a
   // resource turns a wood into a chore.
+  // Each harvestable carries the vegetation entry it IS (`source`), so exhausting it can
+  // take that entry's instance out of the world — a tree that yields nothing but still
+  // stands is a tree the player keeps walking back to (MASTER_SPEC §14).
   const props = [];
   trees.forEach((tree, i) => {
-    if (i % 3 === 0) props.push({ kind: 'tree', material: 'wood', x: tree.x, z: tree.z, total: 50 });
+    if (i % 3 === 0) {
+      props.push({ kind: 'tree', material: 'wood', x: tree.x, z: tree.z, total: 50, source: tree });
+    }
   });
   rocks.forEach((rock, i) => {
-    if (i % 2 === 0) props.push({ kind: 'rock', material: 'brick', x: rock.x, z: rock.z, total: 60 });
+    if (i % 2 === 0) {
+      props.push({ kind: 'rock', material: 'brick', x: rock.x, z: rock.z, total: 60, source: rock });
+    }
   });
+  // §14 — the METAL source. Drawn by the renderer from this entry: unlike the wood and
+  // brick sources it has no vegetation instance to borrow, and an invisible metal source
+  // is a category the player cannot actually harvest.
   for (const poi of POIS) {
     props.push({
       kind: poi.id === 'drayYard' ? 'container' : 'vehicle',
@@ -643,6 +653,7 @@ function buildLayout(island) {
       total: poi.id === 'drayYard' ? 90 : 70
     });
   }
+  props.forEach((prop, i) => { prop.id = i; });
 
   // Loot is AUTHORED per POI (§21.5), not scattered in a ring: a loot route is only a
   // route if the pieces are in rooms and on floors a player has to choose between.

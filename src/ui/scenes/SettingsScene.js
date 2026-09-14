@@ -11,6 +11,8 @@ import { Scene, SceneName } from '../../app/SceneManager.js';
 import { el, mount, button } from '../dom.js';
 import { topBar, backFooter } from '../components/Shell.js';
 import { WHEEL_UP, WHEEL_DOWN } from '../../core/Input.js';
+import { DEV_ACTIONS } from '../../core/Config.js';
+import { isDevMode } from '../../meta/MetaConfig.js';
 
 const GROUPS = [
   ['video', 'Video'],
@@ -26,10 +28,19 @@ const BIND_GROUPS = [
   ['Movement', ['moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump', 'crouch', 'sprint']],
   ['Combat', ['fire', 'aim', 'reload', 'pickaxe', 'interact']],
   ['Weapons', ['weaponSlot1', 'weaponSlot2', 'weaponSlot3', 'weaponSlot4', 'weaponSlot5']],
-  ['Building', ['wall', 'floor', 'ramp', 'cone']],
+  ['Building', ['wall', 'floor', 'ramp', 'cone', 'cycleMaterial']],
   ['Editing', ['edit', 'confirmEdit', 'resetEdit']],
   ['Interface', ['inventory', 'map', 'settings']]
 ];
+
+/**
+ * §4.5 — developer binds, listed only when DEV_MODE is on.
+ *
+ * They are in the binding table at all times, so a conflict with a gameplay bind is caught
+ * whether or not this section is showing. Hiding the section in a production build is a UI
+ * decision; it does not take the actions out of the table.
+ */
+const DEV_BIND_GROUP = ['Developer', [...DEV_ACTIONS]];
 
 const BIND_LABELS = {
   moveForward: 'Move Forward', moveBackward: 'Move Backward',
@@ -40,7 +51,11 @@ const BIND_LABELS = {
   weaponSlot4: 'Slot 4', weaponSlot5: 'Slot 5',
   wall: 'Wall', floor: 'Floor', ramp: 'Ramp', cone: 'Cone',
   edit: 'Edit', confirmEdit: 'Confirm Edit', resetEdit: 'Reset Edit',
-  inventory: 'Inventory', map: 'Map', settings: 'Settings'
+  inventory: 'Inventory', map: 'Map', settings: 'Settings',
+  cycleMaterial: 'Cycle Build Material',
+  toggleAdminMenu: 'Admin Menu', toggleDevConsole: 'Developer Console',
+  toggleCollisionDebug: 'Collision Debug', toggleAiDebug: 'AI Debug',
+  togglePerformancePanel: 'Performance Panel'
 };
 
 /** Pretty-print a bind code. */
@@ -227,7 +242,8 @@ export class SettingsScene extends Scene {
       }));
     }
 
-    for (const [title, actions] of BIND_GROUPS) {
+    const groups = isDevMode() ? [...BIND_GROUPS, DEV_BIND_GROUP] : BIND_GROUPS;
+    for (const [title, actions] of groups) {
       nodes.push(el('h3', {
         text: title,
         style: {

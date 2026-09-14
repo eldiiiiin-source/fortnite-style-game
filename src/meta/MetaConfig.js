@@ -206,10 +206,23 @@ export const BOT = Object.freeze({
 /* ══ ADMIN — ADMIN_PANEL_SPEC §1.2, §15 ═════════════════════════════════════ */
 
 export const ADMIN = Object.freeze({
-  toggleKey: 'F8',
-  collisionDebugKey: 'F9',
-  aiDebugKey: 'F10',
-  performanceKey: 'F11',
+  /**
+   * §1.2 — the panel's keys are ordinary bindable ACTIONS in the game's one binding table
+   * (`DEFAULT_BINDINGS` in core/Config, `MASTER_SPEC` §4.5), not key codes held here. The
+   * panel looks each one up at the moment a key arrives, so a rebind takes effect at once
+   * and a conflict with a gameplay bind is reported rather than discovered in play.
+   *
+   * There was a key code here, and a second one hard-coded in the panel for the console;
+   * between them they owned F8 and Backquote outside the binding system entirely, so
+   * neither could be rebound and ``` could not be used for the pickaxe.
+   */
+  toggleAction: 'toggleAdminMenu',
+  consoleAction: 'toggleDevConsole',
+  collisionDebugAction: 'toggleCollisionDebug',
+  aiDebugAction: 'toggleAiDebug',
+  performanceAction: 'togglePerformancePanel',
+  /** §4.4 — how much one material-grant button gives. */
+  materialGrant: 500,
   eventLogLimit: 100,
   // How far the event log walks into a payload before giving up (§15). Two levels
   // reach a piece's cell, which is the deepest detail worth logging.

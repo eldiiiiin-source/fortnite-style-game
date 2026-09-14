@@ -78,6 +78,7 @@ Click into the game window once so it captures your mouse. Press `Esc` to releas
 | Build — floor | `F` |
 | Build — ramp | `C` |
 | Build — cone | `V` |
+| Switch build material (wood → brick → metal) | `X` |
 | Edit a piece | `G` |
 | Confirm edit | `Left Mouse` |
 | Reset edit selection | `Mouse Wheel Down` |
@@ -85,9 +86,14 @@ Click into the game window once so it captures your mouse. Press `Esc` to releas
 | Inventory | `Tab` |
 | Settings | `Esc` |
 | Admin panel (dev mode only) | `F8` |
+| Developer console (dev mode only) | `F9` |
 
 **`1` is shared** between the pickaxe and your first weapon slot, and toggles between them.
 Every binding is editable under **Settings**.
+
+You start a match with **no materials**. Harvest them: trees give wood, rocks give brick,
+and vehicles and containers give metal. Each source runs out and disappears once it does.
+Building spends the material currently selected on the HUD — `X` switches it.
 
 Two gameplay settings worth knowing, both under **Settings**:
 
@@ -102,7 +108,11 @@ Dev mode is **on automatically** when you run `npm run dev`, and **off** in a pr
 build. There is a red `DEV MODE` badge at the top of the screen when it is on.
 
 With it on, `F8` opens the admin panel: teleport, give weapons and materials, spawn loot,
-control the storm, control bots, toggle god mode.
+control the storm, control bots, toggle god mode. `F9` opens the developer console, and
+`F10`, `F11` and `F6` toggle the collision, AI and performance overlays.
+
+All five are ordinary keybinds: they appear under **Settings → Keybinds → Developer** and
+can be changed like any other. Nothing is bound to `` ` `` — that key is free for you to use.
 
 **To play without it** — no badge, no admin panel, no cheats:
 
@@ -142,6 +152,8 @@ Nothing here blocks a complete match. All of it is known and none of it is a sur
 - Interiors are deliberately dim. They are lit enough to fight in, not enough to sightsee.
 - The visual swing of the harvesting tool is snappy — the strike lands about 55 ms after the
   damage does, so the wind-up is only a frame or two at 60 fps.
+- The character rig has a single rigid arm with no elbow, so aiming down sights raises the
+  weapon to shoulder height rather than tucking it into the shoulder.
 
 **Not bugs, but worth knowing**
 

@@ -276,6 +276,26 @@ export class AdminService {
     return this.setMaterials(MATERIAL_CAP);
   }
 
+  /**
+   * §4.4 — grant ONE material, or all three with `'all'`.
+   *
+   * Adds to the player's real counts and clamps at the cap; there is no separate admin
+   * pool, so a grant is indistinguishable from an honestly harvested one and the build
+   * system spends it exactly the same way (`MASTER_SPEC` §9.4.1).
+   */
+  giveMaterials(type = 'all', amount = MATERIAL_CAP) {
+    return this._guard(() => {
+      if (!this.game) return fail('noMatch');
+      if (!Number.isFinite(amount) || amount <= 0) return fail('invalidAmount');
+      const targets = type === 'all' ? MATERIAL_ORDER : [type];
+      if (targets.some((m) => !MATERIAL_ORDER.includes(m))) return fail('unknownMaterial');
+
+      const granted = {};
+      for (const m of targets) granted[m] = this.game.player.addMaterial(m, amount);
+      return ok({ granted, materials: { ...this.game.player.materials } });
+    });
+  }
+
   /** §5.1 — data-driven presets. */
   applyLoadout(name) {
     return this._guard(() => {

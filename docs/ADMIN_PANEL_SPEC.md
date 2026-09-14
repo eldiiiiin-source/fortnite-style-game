@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.0.0 |
+| Version | 1.1.0 |
 | Purpose | Testing, balancing, QA, debugging, rapid iteration, BR simulation, shop and profile testing |
 | Companion | `docs/BATTLE_ROYALE_SPEC.md`, `docs/ITEM_SHOP_SPEC.md` |
 
@@ -31,11 +31,17 @@ server-grade permissions. No authentication backend required yet. When a backend
 
 | DEV_MODE | Behaviour |
 | --- | --- |
-| Enabled | **F8** (configurable) opens/closes the panel |
-| Disabled | F8 does nothing; admin modules expose no gameplay actions; admin UI must not render |
+| Enabled | `toggleAdminMenu` (default **F8**) opens/closes the panel |
+| Disabled | The bind does nothing; admin modules expose no gameplay actions; admin UI must not render |
 
-Optional shortcuts: **F9** collision debug, **F10** AI debug, **F11** performance overlay —
-all DEV_MODE-only, and none may conflict with gameplay binds by default.
+The console is `toggleDevConsole` (default **F9**). Optional shortcuts:
+`toggleCollisionDebug` (**F10**), `toggleAiDebug` (**F11**), `togglePerformancePanel`
+(**F6**) — all DEV_MODE-only, and none may conflict with gameplay binds by default.
+
+Every one of these is an ordinary bindable action in the game's single binding table
+(`MASTER_SPEC` §4.1, §4.5): rebindable in Settings, persisted, conflict-checked. The panel
+registers no key listener carrying a key code of its own, and **no admin bind takes
+`Backquote`** — `` ` `` belongs to the player.
 
 ### 1.3 No admin advantage in normal mode
 
@@ -92,6 +98,13 @@ normal. **NO RELOAD is a separate toggle** — the two are not permanently combi
 
 Building consumes no wood/brick/metal. **The actual material inventory values remain
 intact.** Disabling restores normal consumption.
+
+### 4.4 Material grants
+
+Per-material grants, each a single click: **+500 Wood**, **+500 Brick**, **+500 Metal**,
+**+500 All**, alongside the infinite-materials toggle above. Grants add to the player's
+real material counts and clamp at the cap (`MASTER_SPEC` §9.4); they are not a separate
+pool.
 
 ## 5. Inventory tools
 
@@ -331,4 +344,5 @@ config files**.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.1.0 | 2026-09-14 | §1.2: the panel and console binds become ordinary bindable actions in the game's single binding table; the console moves off `Backquote` to `toggleDevConsole` (F9) and the debug shortcuts shift to F10/F11/F6. §4.4: per-material grant buttons. |
 | 1.0.0 | 2026-09-13 | Initial authoritative specification from the project owner. |

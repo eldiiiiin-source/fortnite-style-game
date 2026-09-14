@@ -6,11 +6,11 @@
  * Reads game state, writes DOM. Never mutates simulation state. Updates are driven by
  * state changes each frame, never polled on a delay (§18.1).
  */
+import { RARITIES, PIECE_TYPES } from '../core/Config.js';
 import {
-  VITALS, MATERIALS, MATERIAL_ORDER, RARITIES, PIECE_TYPES, BUILD
-} from '../core/Config.js';
-
-const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+  vitalsBars, materialRow, pushMaterialGain, expireMaterialGains, cssHex as hex
+} from './HudModel.js';
+import { weaponIconUrl } from './components/WeaponIcon.js';
 
 const HUD_CSS = `
 .hud { --hud-bg: rgba(10,13,18,0.66); --hud-edge: rgba(255,255,255,0.14);
@@ -18,18 +18,31 @@ const HUD_CSS = `
 .hud .panel { background: var(--hud-bg); border: 1px solid var(--hud-edge);
   border-radius: 4px; backdrop-filter: blur(3px); }
 
+/* §18.2 — bottom of the screen, horizontal, shield stacked directly above health. */
 .hud .bars { position:absolute; left:50%; bottom:52px; transform:translateX(-50%); width:420px; }
 .hud .bar { height:18px; margin-bottom:5px; border-radius:3px; overflow:hidden; position:relative;
   background: var(--hud-bg); border:1px solid var(--hud-edge); }
-.hud .bar > i { display:block; height:100%; width:0; transition: width 90ms linear; }
+/* §18.1 — no transition: a bar reflects its value on the frame the value changes. */
+.hud .bar > i { display:block; height:100%; width:0; }
 .hud .bar > span { position:absolute; right:9px; top:0; line-height:18px; font-size:12px;
   font-weight:800; letter-spacing:.04em; text-shadow:0 1px 3px #000; color:#fff; }
-.hud .shield > i { background:linear-gradient(180deg,#6ee6f7,#2fbcd6); }
-.hud .health > i { background:linear-gradient(180deg,#ffffff,#c8d2da); }
 
-.hud .mats { position:absolute; right:22px; bottom:214px; display:flex; gap:8px; }
+.hud .mats { position:absolute; right:22px; bottom:214px; display:flex; gap:8px;
+  align-items:flex-end; }
 .hud .mat { padding:5px 11px; font-weight:800; font-size:13px; min-width:46px; text-align:right;
-  border-radius:3px; background:var(--hud-bg); border:1px solid var(--hud-edge); }
+  border-radius:3px; background:var(--hud-bg); border:1px solid var(--hud-edge);
+  border-bottom-width:2px; opacity:.62; }
+/* §9.4.1 — which material a placement will spend has to be visible at all times. */
+.hud .mat.selected { opacity:1; background:rgba(22,28,38,.92); }
+.hud .mat.poor { color:#ff6b6b; }
+
+/* §18.3 — harvest feedback, at the materials panel, in the material's own colour. */
+.hud .gains { position:absolute; right:22px; bottom:250px; display:flex;
+  flex-direction:column; align-items:flex-end; gap:3px; pointer-events:none; }
+.hud .gain { padding:3px 9px; font-weight:900; font-size:13px; letter-spacing:.02em;
+  border-radius:3px; background:rgba(10,13,18,.72); text-shadow:0 1px 3px #000;
+  animation:gainrise .22s ease-out; }
+@keyframes gainrise { from { opacity:0; transform:translateY(7px); } }
 
 .hud .buildbar { position:absolute; right:22px; bottom:166px; display:flex; gap:5px; }
 .hud .slot { width:60px; height:42px; display:grid; place-items:center; font-size:10px;
@@ -44,6 +57,8 @@ const HUD_CSS = `
 .hud .islot.active { border-color:#fff; transform:translateY(-3px); }
 .hud .islot .nm { font-weight:700; line-height:1.15; }
 .hud .islot .am { font-weight:800; font-size:11px; text-align:right; }
+.hud .islot .ico { flex:1; margin:1px 0; background-repeat:no-repeat; background-position:center;
+  background-size:contain; }
 .hud .islot .key { position:absolute; opacity:.5; font-size:8px; }
 
 .hud .crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -117,6 +132,9 @@ export class HUD {
     this.root?.classList.add('hud');
     this.killFeed = [];
     this._hitmarkerTimer = 0;
+    /** §18.3 — live material-gain readouts, and the clock they expire against. */
+    this.materialGains = [];
+    this._gainClock = 0;
     if (!this.root) return;
 
     const style = document.createElement('style');
@@ -160,6 +178,7 @@ export class HUD {
         <div class="bar health"><i data-health-fill></i><span data-health-text>100</span></div>
       </div>
 
+      <div class="gains" data-gains></div>
       <div class="mats" data-mats></div>
       <div class="buildbar" data-buildbar></div>
       <div class="invbar" data-invbar></div>
@@ -172,7 +191,8 @@ export class HUD {
       alive: q('[data-alive]'), elims: q('[data-elims]'),
       shieldFill: q('[data-shield-fill]'), shieldText: q('[data-shield-text]'),
       healthFill: q('[data-health-fill]'), healthText: q('[data-health-text]'),
-      mats: q('[data-mats]'), buildbar: q('[data-buildbar]'), invbar: q('[data-invbar]'),
+      mats: q('[data-mats]'), gains: q('[data-gains]'),
+      buildbar: q('[data-buildbar]'), invbar: q('[data-invbar]'),
       crosshair: q('[data-crosshair]'), hitmarker: q('[data-hitmarker]'),
       prompt: q('[data-prompt]'), editstate: q('[data-editstate]'), debug: q('[data-debug]'),
       minimap: q('[data-minimap]'), stormbar: q('[data-stormbar]'),
@@ -183,8 +203,8 @@ export class HUD {
   }
 
   _buildStatic() {
-    this.el.mats.innerHTML = MATERIAL_ORDER.map((m) =>
-      `<div class="mat" data-mat="${m}" style="color:${hex(MATERIALS[m].color)}">0</div>`
+    this.el.mats.innerHTML = materialRow({}).map((m) =>
+      `<div class="mat" data-mat="${m.id}" style="color:${m.color}">0</div>`
     ).join('');
 
     this.el.buildbar.innerHTML = PIECE_TYPES.map((t) =>
@@ -201,25 +221,32 @@ export class HUD {
   update(s, dt = 0) {
     if (!this.root) return;
 
-    const hp = Math.round(s.health ?? 0);
-    const sh = Math.round(s.shield ?? 0);
-    this.el.healthFill.style.width = `${(hp / VITALS.maxHealth) * 100}%`;
-    this.el.shieldFill.style.width = `${(sh / VITALS.maxShield) * 100}%`;
-    this.el.healthText.textContent = hp;
-    this.el.shieldText.textContent = sh;
+    // §18.2 — green health, blue shield, each showing its value as well as its fill. The
+    // numbers come from HudModel so the bar and the readout are one decision, not two.
+    const bars = vitalsBars(s);
+    this._setBar(this.el.healthFill, this.el.healthText, bars.health);
+    this._setBar(this.el.shieldFill, this.el.shieldText, bars.shield);
 
-    for (const m of MATERIAL_ORDER) {
-      const el = this.el.mats.querySelector(`[data-mat="${m}"]`);
-      if (el) el.textContent = Math.floor(s.materials?.[m] ?? 0);
+    // §9.4.1 — counts, plus which material a placement will actually spend.
+    const mats = materialRow(s);
+    let poor = false;
+    for (const m of mats) {
+      const el = this.el.mats.querySelector(`[data-mat="${m.id}"]`);
+      if (!el) continue;
+      el.textContent = m.count;
+      el.classList.toggle('selected', m.selected);
+      el.classList.toggle('poor', m.selected && !m.affordable);
+      if (m.selected) poor = !m.affordable;
     }
 
-    const poor = (s.materials?.[s.selectedMaterial] ?? 0) < BUILD.cost;
     for (const t of PIECE_TYPES) {
       const el = this.el.buildbar.querySelector(`[data-piece="${t}"]`);
       if (!el) continue;
       el.classList.toggle('active', !!s.buildMode && s.selectedPiece === t);
       el.classList.toggle('poor', poor);
     }
+
+    this._renderMaterialGains(dt);
 
     this._renderInventory(s);
     this._renderCrosshair(s);
@@ -256,6 +283,45 @@ export class HUD {
         `${(1000 / Math.max(s.stats.frameMs, 0.01)).toFixed(0)} fps · ` +
         `sim ${s.stats.simMs.toFixed(2)}ms · pieces ${s.pieceCount ?? 0}`;
     }
+  }
+
+  /** §18.1, §18.2 — one bar, painted from its model. No tween: the fill IS the value. */
+  _setBar(fill, text, bar) {
+    fill.style.width = `${bar.fraction * 100}%`;
+    fill.style.background = `linear-gradient(180deg,${bar.colors.top},${bar.colors.bottom})`;
+    text.textContent = bar.value;
+  }
+
+  /**
+   * §18.3 — harvest feedback.
+   *
+   * Driven by the material-gained event through `showMaterialGain`; this only ages what is
+   * already there. The HUD owns the one clock, and `HudModel` owns what a gain says.
+   */
+  _renderMaterialGains(dt) {
+    if (this.materialGains.length === 0) return;
+    this._gainClock += dt;
+    const before = this.materialGains.length;
+    this.materialGains = expireMaterialGains(this.materialGains, this._gainClock);
+    if (this.materialGains.length !== before) this._paintGains();
+  }
+
+  _paintGains() {
+    this.el.gains.innerHTML = this.materialGains.map((g) =>
+      `<div class="gain" style="color:${g.color}">+${g.amount} ${g.label}</div>`
+    ).join('');
+  }
+
+  /**
+   * §18.3 — a material was gained. Called from the MATERIAL_GAINED event, never polled.
+   * Repeated swings on the same material stack into one growing readout.
+   */
+  showMaterialGain(type, amount) {
+    if (!this.root) return;
+    this.materialGains = pushMaterialGain(this.materialGains, {
+      type, amount, now: this._gainClock
+    });
+    this._paintGains();
   }
 
   /** BATTLE_ROYALE_SPEC §8.4 — storm timer, phase, damage rate and warning. */
@@ -314,8 +380,12 @@ export class HUD {
       if (slot.kind === 'weapon') {
         const colour = hex(RARITIES[slot.rarity].color);
         const w = slot.weapon;
+        // §12.1.1 — the slot shows the weapon's own model, the same one the hand and the
+        // world pickup are built from.
+        const icon = weaponIconUrl(w);
         return `<div class="islot panel${active}" style="border-color:${colour}">
           <div class="nm">${w.name}</div>
+          <div class="ico"${icon ? ` style="background-image:url(${icon})"` : ''}></div>
           <div class="am">${w.ammoInMag}<span style="opacity:.6">/${inv.ammo[w.ammoType] ?? 0}</span></div>
         </div>`;
       }

@@ -20,6 +20,7 @@ import { resolveBuildTarget } from './building/BuildTargeting.js';
 import { EditController } from './editing/EditController.js';
 import { PlayerController } from './player/PlayerController.js';
 import { PlayerCamera } from './player/PlayerCamera.js';
+import { equippedView } from './player/EquippedItem.js';
 import { aimRayFrom, rayAabb } from './player/AimRay.js';
 import { Health } from './combat/Health.js';
 import { Inventory, Weapon } from './combat/Weapon.js';
@@ -224,6 +225,19 @@ export class Game {
    */
   get pickaxeSwingProgress() {
     return this.inventory.pickaxeEquipped ? this.pickaxe.swingProgress : 1;
+  }
+
+  /**
+   * MASTER_SPEC §15.4 — what the character is holding, resolved from the inventory.
+   *
+   * The single authority the view reads. It is derived, never stored: there is no second
+   * copy of "what is equipped" anywhere that could disagree with the inventory.
+   */
+  get equippedView() {
+    return equippedView(this.inventory, {
+      pickaxeId: this.cosmetics?.pickaxe?.id ?? null,
+      swingProgress: this.pickaxeSwingProgress
+    });
   }
 
   /**
@@ -446,6 +460,15 @@ export class Game {
         if (this.settings?.buildImmediately ?? true) this._setBuildMode(true);
       }
     });
+
+    // §9.4.1 — cycle the build material. Placement spends the SELECTED material from the
+    // player's own harvested stock; there is no fallback to another material when the
+    // selected one is short, so the selection has to be reachable in play.
+    if (input.wasPressed('cycleMaterial')) {
+      const i = MATERIAL_ORDER.indexOf(this.selectedMaterial);
+      this.selectedMaterial = MATERIAL_ORDER[(i < 0 ? 0 : i + 1) % MATERIAL_ORDER.length];
+      this.bus.emit(Events.BUILD_MATERIAL_CHANGED, { material: this.selectedMaterial });
+    }
 
     // Weapon slots and pickaxe leave build mode.
     //

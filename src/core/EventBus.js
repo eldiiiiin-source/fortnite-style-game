@@ -71,6 +71,8 @@ export const Events = Object.freeze({
   PURCHASE_COMPLETED: 'shop:purchaseCompleted',
   COSMETIC_EQUIPPED: 'profile:cosmeticEquipped',
   BUILD_MODE_CHANGED: 'build:modeChanged',
+  /** MASTER_SPEC §9.4.1 — the material a placement will spend has changed. */
+  BUILD_MATERIAL_CHANGED: 'build:materialChanged',
   EDIT_STARTED: 'edit:started',
   EDIT_CONFIRMED: 'edit:confirmed',
   EDIT_CANCELLED: 'edit:cancelled'

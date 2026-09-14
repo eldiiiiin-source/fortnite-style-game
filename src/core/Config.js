@@ -197,6 +197,55 @@ export const PICKAXE_VIEW = Object.freeze({
   carryClearance: CHARACTER.radius * 0.15
 });
 
+/* ══ WEAPON VIEW — MASTER_SPEC §12.1.1, §12.1.2 ══════════════════════════════
+ * How big a weapon LOOKS and where it sits in the hand. Every length is a ratio of the
+ * player capsule, so a retune of the build module rescales weapons with their wielder.
+ *
+ * Nothing in this block reaches gameplay: damage, spread, recoil and ADS timing are
+ * WEAPONS and SPREAD, above.
+ */
+
+export const WEAPON_VIEW = Object.freeze({
+  /** Reference length — an assault rifle. Every category scales against it (§12.1.1). */
+  length: CHARACTER.height * 0.40,
+  /** Receiver cross-section: the body the barrel, stock and magazine hang off. */
+  bodyHeight: CHARACTER.radius * 0.36,
+  bodyWidth: CHARACTER.radius * 0.17,
+  barrelRadius: CHARACTER.radius * 0.055,
+
+  /** Where the primary hand closes, as a fraction of length back from the muzzle. */
+  gripAlong: 0.62,
+
+  /**
+   * How far the shoulder swings the arm forward, radians (§12.1.2).
+   *
+   * This is what actually MOVES the weapon: the grip is derived from where the arm puts
+   * the hand, so the hand always holds the weapon rather than hovering near it. The rig's
+   * arm is one rigid segment with no elbow, so a fully-raised arm reaches shoulder height
+   * and no higher — the ADS value takes it as far as the rig honestly goes, and the wrist
+   * offsets below carry it the rest of the way to the aim line.
+   */
+  hipArmPitch: 0.62,
+  adsArmPitch: 1.42,
+
+  /**
+   * Wrist offsets from the hand to the grip, hip and ADS. Small by construction: anything
+   * large here would be the weapon floating out of the hand rather than being held in it.
+   */
+  hipOut: CHARACTER.radius * -0.06,     // a touch inboard of the shoulder line
+  adsOut: CHARACTER.radius * -0.85,     // drawn in toward the aim line
+  hipLift: 0,
+  adsLift: CHARACTER.height * 0.055,
+  hipForward: CHARACTER.radius * 0.10,
+  adsForward: CHARACTER.radius * 0.16,
+
+  /** Muzzle attitude in rig space. Down and toed in at the hip; level when aimed. */
+  hipPitch: 0.24,
+  adsPitch: -0.04,
+  hipYaw: 0.16,
+  adsYaw: 0.03
+});
+
 /* ══ CAMERA — MASTER_SPEC §7 ═════════════════════════════════════════════════ */
 
 export const CAMERA = Object.freeze({
@@ -248,6 +297,16 @@ export const MATERIALS = Object.freeze({
 });
 
 export const MATERIAL_ORDER = Object.freeze(['wood', 'brick', 'metal']);
+
+/* ══ HUD VITALS — MASTER_SPEC §18.2 ══════════════════════════════════════════
+ * Health reads GREEN and shield reads BLUE, which is how the genre reads them. Each bar
+ * is a two-stop vertical gradient: a lit top and a darker base, so a bar has form rather
+ * than being a flat rectangle.
+ */
+export const VITAL_COLORS = Object.freeze({
+  health: Object.freeze({ top: '#3ad64a', bottom: '#1f9c2c' }),
+  shield: Object.freeze({ top: '#4aa8ff', bottom: '#1f6fd6' })
+});
 export const MATERIAL_CAP = 500;
 
 /* ══ EDITING — MASTER_SPEC §10 ═══════════════════════════════════════════════ */
@@ -389,10 +448,29 @@ export const DEFAULT_BINDINGS = Object.freeze({
   weaponSlot1: 'Digit1', weaponSlot2: 'Digit2', weaponSlot3: 'Digit3',
   weaponSlot4: 'Digit4', weaponSlot5: 'Digit5',
   wall: 'KeyQ', floor: 'KeyF', ramp: 'KeyC', cone: 'KeyV',
+  cycleMaterial: 'KeyX',           // §4.4, §9.4.1 — wood -> brick -> metal
   edit: 'KeyG', confirmEdit: 'Mouse0',
   resetEdit: 'WheelDown',          // [OWNER] §10.9
-  inventory: 'Tab', map: 'KeyM', settings: 'Escape'
+  inventory: 'Tab', map: 'KeyM', settings: 'Escape',
+
+  // §4.4, §4.5 — developer actions live in the SAME table as everything else, so they are
+  // rebindable, persisted, listed in Settings and conflict-checked like any other bind.
+  // They do nothing unless DEV_MODE is on (ADMIN_PANEL_SPEC §1.2).
+  //
+  // None of them takes Backquote: ``` belongs to the player, who may bind it to the
+  // pickaxe or anything else without a developer tool intercepting it.
+  toggleAdminMenu: 'F8',
+  toggleDevConsole: 'F9',
+  toggleCollisionDebug: 'F10',
+  toggleAiDebug: 'F11',
+  togglePerformancePanel: 'F6'
 });
+
+/** §4.5 — the developer subset of DEFAULT_BINDINGS, inert with DEV_MODE off. */
+export const DEV_ACTIONS = Object.freeze([
+  'toggleAdminMenu', 'toggleDevConsole',
+  'toggleCollisionDebug', 'toggleAiDebug', 'togglePerformancePanel'
+]);
 
 /** Binds that may legitimately share a key with another action. */
 export const BIND_CONFLICT_EXEMPT = Object.freeze([
