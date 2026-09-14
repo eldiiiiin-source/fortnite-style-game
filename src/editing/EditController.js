@@ -1,53 +1,52 @@
 /**
- * EditController.js — the edit state machine. MASTER_SPEC §7.2, §7.7.
+ * EditController.js — the edit state machine. MASTER_SPEC §10.
  *
- * Editing never blocks movement: this holds no movement lock and returns no "busy" state
- * that the player controller consults.
+ * Editing must be extremely responsive, must never get stuck, and must update geometry
+ * AND collision together. Collision is derived from the edit pattern by PieceGeometry, so
+ * confirming an edit updates both by construction (§11).
  */
 import { EDIT } from '../core/Config.js';
 import { Events } from '../core/EventBus.js';
-import { resolvePattern, selectionKey } from './EditPatterns.js';
+import { resolvePattern, selectionKey, isValidTile, tileCount } from './EditPatterns.js';
 
 export const EditState = Object.freeze({
   IDLE: 'idle',
   ENTERING: 'entering',
-  SELECTING: 'selecting',
-  CONFIRMING: 'confirming'
+  SELECTING: 'selecting'
 });
 
 export const EditReject = Object.freeze({
+  NO_TARGET: 'noTarget',
   NOT_OWNER: 'notOwner',
   OUT_OF_RANGE: 'outOfRange',
-  INVALID_PATTERN: 'invalidPattern',
-  NO_TARGET: 'noTarget'
+  INVALID_PATTERN: 'invalidPattern'
 });
 
 export class EditController {
-  /**
-   * @param {import('../building/BuildGrid.js').BuildGrid} grid
-   * @param {import('../core/EventBus.js').EventBus} bus
-   */
-  constructor(grid, bus) {
+  constructor(grid, bus = null, settings = null) {
     this.grid = grid;
     this.bus = bus;
+    this.settings = settings;
 
     this.state = EditState.IDLE;
-    this.target = null;         // BuildPiece being edited
-    this.selection = new Set(); // removed tile indices
+    this.target = null;
+    this.selection = new Set();
     this.timer = 0;
     this.lastReject = null;
-    /** Wall-clock seconds spent in the flow, for the §7.2 budget. */
     this.flowElapsed = 0;
+    /** Guards drag so a held button cannot toggle a tile on and off repeatedly. */
+    this.dragTouched = new Set();
   }
 
   get isEditing() {
     return this.state !== EditState.IDLE;
   }
 
-  /**
-   * Begin editing a piece. §7.2 — own pieces only, within EDIT.range.
-   * @returns {boolean} whether the edit started
-   */
+  get confirmOnRelease() {
+    return this.settings?.confirmEditOnRelease ?? EDIT.confirmOnRelease;
+  }
+
+  /** Begin editing. §10.1 — own pieces only, within range. */
   begin(piece, playerId, distance) {
     if (!piece || piece.destroyed) {
       this.lastReject = EditReject.NO_TARGET;
@@ -65,10 +64,9 @@ export class EditController {
     this.state = EditState.ENTERING;
     this.target = piece;
     this.selection.clear();
-    // Pre-load the piece's existing pattern so re-editing starts from its current shape.
-    if (piece.editPattern) {
-      for (const t of piece.editPattern.removed) this.selection.add(t);
-    }
+    this.dragTouched.clear();
+    // Re-editing starts from the piece's current shape.
+    for (const t of piece.editPattern?.removed ?? []) this.selection.add(t);
     this.timer = 0;
     this.flowElapsed = 0;
     this.lastReject = null;
@@ -76,38 +74,63 @@ export class EditController {
     return true;
   }
 
-  /** Toggle a tile while selecting. Drag calls this once per newly-crossed tile. */
+  /** Tile indices are validated against THIS piece's grid, not a fixed 3x3. */
   toggleTile(index) {
-    if (this.state !== EditState.SELECTING) return;
-    if (index < 0 || index > 8) return;
+    if (this.state !== EditState.SELECTING || !this.target) return false;
+    if (!isValidTile(this.target.type, index)) return false;
     if (this.selection.has(index)) this.selection.delete(index);
     else this.selection.add(index);
+    return true;
   }
 
-  /** Add a tile without toggling — used by drag, which must not flip tiles twice. */
-  selectTile(index) {
-    if (this.state !== EditState.SELECTING) return;
-    if (index >= 0 && index <= 8) this.selection.add(index);
+  /** Drag selection — each tile is taken at most once per drag (§10 step 5). */
+  dragTile(index) {
+    if (this.state !== EditState.SELECTING || !this.target) return false;
+    if (!isValidTile(this.target.type, index)) return false;
+    if (this.dragTouched.has(index)) return false;
+    this.dragTouched.add(index);
+    this.selection.add(index);
+    return true;
   }
 
-  /** `R` while editing — clear the selection back to the full piece (§7.2). */
-  reset() {
-    if (!this.isEditing) return;
+  endDrag() {
+    this.dragTouched.clear();
+  }
+
+  /** Clear the selection back to the full piece. */
+  resetSelection() {
     this.selection.clear();
+    this.dragTouched.clear();
   }
 
   /**
-   * Confirm the current selection. Applies the pattern if it is in the allow list,
-   * otherwise rejects and leaves the piece untouched (§7.7 rule 1).
-   * @returns {{ok:boolean, reason?:string, pattern?:object}}
+   * §10.9 — instant reset of an already-edited piece, without entering the edit flow.
+   * Aim at an edited build, press the bind, the structure resets immediately.
+   */
+  resetPiece(piece, playerId, distance) {
+    if (!piece || piece.destroyed) return { ok: false, reason: EditReject.NO_TARGET };
+    if (piece.ownerId !== playerId) return { ok: false, reason: EditReject.NOT_OWNER };
+    if (distance > EDIT.range) return { ok: false, reason: EditReject.OUT_OF_RANGE };
+
+    piece.editPattern = null;
+    this.grid.touch();              // collision rebuilds from the new (empty) pattern
+    this.bus?.emit(Events.PIECE_EDITED, { piece, pattern: null, reset: true });
+    if (this.target === piece) this._toIdle();
+    return { ok: true };
+  }
+
+  /**
+   * Confirm the current selection. An unlisted pattern is rejected and the piece is left
+   * untouched (§10.3).
    */
   confirm() {
     if (!this.isEditing || !this.target) {
       return { ok: false, reason: EditReject.NO_TARGET };
     }
 
+    const piece = this.target;
     const tiles = [...this.selection];
-    const pattern = resolvePattern(this.target.type, tiles);
+    const pattern = resolvePattern(piece.type, tiles);
 
     if (!pattern) {
       this.lastReject = EditReject.INVALID_PATTERN;
@@ -115,17 +138,14 @@ export class EditController {
       return { ok: false, reason: EditReject.INVALID_PATTERN };
     }
 
-    const piece = this.target;
-
-    // §7.7 rule 3 — an edit that removes everything deletes the piece; support
-    // re-evaluation happens on the next StructureGraph tick.
     if (pattern.deletesPiece) {
       piece.destroyed = true;
-      this.grid.remove(piece);
+      this.grid.remove(piece);      // removal bumps revision; collision vanishes with it
       this.bus?.emit(Events.PIECE_DESTROYED, { piece, cause: 'edit' });
     } else {
-      // §7.7 rule 1 — HP, material and owner are untouched by editing.
+      // HP, material and owner are untouched by editing (§10.11).
       piece.editPattern = pattern.key === '' ? null : pattern;
+      this.grid.touch();            // §10.8 — geometry and collision rebuild together
       this.bus?.emit(Events.PIECE_EDITED, { piece, pattern });
     }
 
@@ -145,19 +165,20 @@ export class EditController {
     this.state = EditState.IDLE;
     this.target = null;
     this.selection.clear();
+    this.dragTouched.clear();
     this.timer = 0;
   }
 
   /**
-   * Advance the state machine. ENTERING and CONFIRMING are the two 0.10 s gates in §7.2.
-   * Also enforces the range check every tick so walking away cancels the edit.
+   * §10.1 — walking out of range or losing the target cancels cleanly. There is no path
+   * that leaves the controller editing a piece it cannot reach.
    */
   update(dt, { distanceToTarget = 0 } = {}) {
     if (!this.isEditing) return;
 
     this.flowElapsed += dt;
 
-    if (this.target?.destroyed) {
+    if (!this.target || this.target.destroyed) {
       this.cancel();
       return;
     }
@@ -174,8 +195,12 @@ export class EditController {
     }
   }
 
-  /** Current selection as a canonical key, for the UI and for tests. */
   get selectionKey() {
     return selectionKey([...this.selection]);
+  }
+
+  /** Tile count of the piece being edited, for the overlay. */
+  get gridTileCount() {
+    return this.target ? tileCount(this.target.type) : 0;
   }
 }

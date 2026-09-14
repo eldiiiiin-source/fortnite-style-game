@@ -1,75 +1,60 @@
 /**
- * main.js — browser entry point. Owns the loop, the renderer, and the HUD.
+ * main.js — browser entry point.
  *
- * The simulation is in Game.js and never touches anything in this file.
+ * Boots the real Application and SceneManager flow:
+ *   LAUNCH → LOBBY → SHOP / LOCKER / SETTINGS → PLAY → MATCH → RESULTS → LOBBY
+ *
+ * It no longer constructs a sandbox Game. Game is created per match by Application.
  */
 import { Loop } from './core/Loop.js';
 import { Input } from './core/Input.js';
-import { Game } from './Game.js';
-import { Renderer } from './world/Renderer.js';
-import { HUD } from './ui/HUD.js';
-import { cellCentre } from './building/BuildGrid.js';
-import { BUILD } from './core/Config.js';
+import { Settings } from './core/Settings.js';
+import { Application } from './app/Application.js';
+import { GameUI } from './ui/GameUI.js';
+import { SceneName } from './app/SceneManager.js';
+import { AudioSystem } from './audio/AudioSystem.js';
 
-const seed = Number(new URLSearchParams(location.search).get('seed') ?? 1337);
+const params = new URLSearchParams(location.search);
+const seedParam = params.get('seed');
 
-const input = new Input();
-const game = new Game({ seed, input });
-const renderer = new Renderer(document.getElementById('app'), game.terrain);
-const hud = new HUD();
+// Settings load first: the UI, input and renderer all read from them.
+const settings = new Settings();
+settings.load();
 
-input.attach(renderer.domElement);
+const input = new Input(settings.bindings);
 
-const overlay = document.getElementById('click-to-play');
-overlay.addEventListener('click', () => {
-  input.requestPointerLock();
-});
-document.addEventListener('pointerlockchange', () => {
-  overlay.style.display = input.pointerLocked ? 'none' : 'grid';
+const app = new Application({
+  settings,
+  input,
+  seed: seedParam !== null ? Number(seedParam) : null
 });
 
-const simulate = (dt) => game.update(dt);
+const ui = new GameUI(app, { input });
 
-const render = () => {
-  game.camera.update(1 / 60, game.player, {
-    buildMode: game.buildMode,
-    adsProgress: game.inventory.activeWeapon?.adsProgress ?? 0,
-    adsFov: game.inventory.activeWeapon?.def.adsFov
-  });
-  renderer.syncCamera(game.camera);
-  renderer.updateStreaming(game.player.position);
-
-  if (game.gridDirty) {
-    renderer.syncBuildGrid(game.grid);
-    game.gridDirty = false;
-  }
-
-  // Placement ghost — §6.3 rule 3.
-  if (game.buildMode && game.buildTarget) {
-    const c = cellCentre(
-      game.buildTarget.cell.cx, game.buildTarget.cell.cy, game.buildTarget.cell.cz
-    );
-    const yaw = { north: 0, east: Math.PI / 2, south: Math.PI, west: -Math.PI / 2 }[game.buildTarget.direction] ?? 0;
-    const half = BUILD.tileSize / 2;
-    const off = { north: [0, -half], south: [0, half], east: [half, 0], west: [-half, 0] };
-    const [dx, dz] = game.selectedPiece === 'wall'
-      ? (off[game.buildTarget.direction] ?? [0, -half])
-      : [0, 0];
-    renderer.updateGhost({
-      position: { x: c.x + dx, y: c.y, z: c.z + dz },
-      yaw,
-      valid: (game.player.materials[game.selectedMaterial] ?? 0) >= BUILD.cost
-    });
-  } else {
-    renderer.updateGhost(null);
-  }
-
-  renderer.render();
-  hud.update(game.hudState(loop.stats));
+// Audio needs a user gesture before it may start; the first click provides one.
+const audio = new AudioSystem({ settings });
+audio.attach(app.bus);
+const startAudio = () => {
+  audio.init();
+  window.removeEventListener('pointerdown', startAudio);
 };
+window.addEventListener('pointerdown', startAudio);
+settings.onChange(() => audio.applySettings());
 
-const loop = new Loop(simulate, render);
+// Enter the lobby. Application constructed its scenes already; GameUI replaced them with
+// the rendering versions, so re-entering makes the real lobby render.
+app.scenes.current = null;
+app.scenes.goTo(SceneName.LOBBY);
+
+const loop = new Loop(
+  (dt) => app.update(dt),
+  (alpha) => ui.render(alpha, loop.stats.frameMs, 1 / 60)
+);
+ui.loop = loop;
 loop.start();
 
-// Expose for debugging in the console. Not used by any game code.
-window.__game = { game, renderer, loop, input };
+// Debug handle. No game code reads this.
+window.__game = { app, ui, loop, input, settings, audio };
+
+// Tell the boot splash the module graph is live.
+window.dispatchEvent(new Event('game-ready'));

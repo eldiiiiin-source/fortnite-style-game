@@ -49,14 +49,15 @@ references/            Research + reference material, not shipped code
   editing/             Edit grid patterns, edit-flow timing notes
   ui/                  HUD mockups, build bar, inventory, minimap references
 src/                   Game source (ES modules)
-  core/                Engine loop, config, input, event bus, math helpers
+  core/                Loop, config, input, events, RNG, settings, performance
   player/              Controller, camera, state machine, stats
   building/            Build grid, pieces, placement, structure integrity
   editing/             Edit grid, edit patterns, edit state machine
-  combat/              Weapons, firing, damage, projectiles, health/shields
-  world/               Terrain, map loading, POIs, harvestables
-  loot/                Loot tables, chests, floor spawns, rarity
-  ui/                  HUD, build bar, inventory, crosshair, damage numbers
+  combat/              Weapons, firing, damage, pickaxe, health/shields
+  world/               Terrain, renderer, bots, test environment
+  loot/                Loot tables and world loot entities
+  audio/               Synthesised cues, event-driven
+  ui/                  HUD, build bar, inventory, crosshair, compass
 assets/                Runtime assets (models, textures, audio, fonts, maps)
 tests/                 Vitest unit tests
 ```
@@ -78,8 +79,15 @@ npm run lint      # ESLint
 - **ES modules only.** `import`/`export`, no CommonJS. `.js` files, no build-step types.
 - **No magic numbers in systems code.** Tunables live in `src/core/Config.js`, grouped by
   spec section, each with a comment naming the spec section it comes from.
-- **Units are metres and seconds.** One build tile is `Config.build.tileSize` metres.
-  Angles are radians internally; degrees only at the spec/UI boundary.
+- **Units are metres and seconds.** Angles are radians internally; degrees only at the
+  spec/UI boundary.
+- **The build module is the unit of scale.** `TILE` and `WALL_H` are declared once in
+  `Config.js` and every other spatial value derives from them by ratio (`MASTER_SPEC
+  §9.1.1`). **No file outside `Config.js` may contain a spatial literal.** Tests assert
+  the derivation, not the absolute, so retuning the module does not break them.
+- **Geometry has one source.** `building/PieceGeometry.js` produces both the visible mesh
+  and the collider from the same edit pattern. Never write a second shape definition —
+  that is what makes stale collision impossible rather than merely unlikely.
 - **Systems are plain classes** with `update(dt, ctx)`. No system reaches into another
   system's internals — communicate through the event bus (`src/core/EventBus.js`) or
   through explicitly passed context.

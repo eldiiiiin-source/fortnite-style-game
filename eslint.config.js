@@ -12,6 +12,13 @@ export default [
         cancelAnimationFrame: 'readonly',
         URLSearchParams: 'readonly',
         fetch: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        HTMLElement: 'readonly',
+        KeyboardEvent: 'readonly',
+        Event: 'readonly',
         location: 'readonly',
         console: 'readonly'
       }

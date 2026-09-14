@@ -1,105 +1,88 @@
 # Edit patterns
 
-Every valid 3×3 selection, per piece type (`MASTER_SPEC §7.3` – §7.6).
+Per-piece-type edit grids, per `docs/MASTER_SPEC.md` §10.2 – §10.7.
 
-Grid indices, viewed face-on from the editing player:
+**The grids are not uniform.** This is the single largest correction the owner's
+specification made to the original baseline, which used 3×3 for every piece type.
 
-```
-0 1 2
-3 4 5
-6 7 8
-```
+| Piece | Grid | Tiles | Tile size (at TILE 5.12 / WALL_H 3.84) |
+| --- | --- | --- | --- |
+| Wall | 3 × 3 | 9 | 1.707 w × 1.280 h |
+| Floor | 2 × 2 | 4 | 2.560 × 2.560 |
+| Cone | 2 × 2 | 4 | 2.560 × 2.560 |
+| Ramp | 3 rows × 2 cols | 6 | 2.560 w, 1.280 rise per row |
 
-In the diagrams below, `#` is **remaining geometry** and `·` is **removed**. The "selected"
-tiles are the removed ones — you select what you want gone.
+`#` is remaining geometry, `·` is removed. You select what you want gone.
 
-## Walls (§7.3)
+## Walkable openings are vertical
 
-```
-Full wall          Window (4)         Door (6,7)         Doorway wide (6,7,8)
-# # #              # # #              # # #              # # #
-# # #              # · #              # # #              # # #
-# # #              # # #              · · #              · · ·
+One wall row is `WALL_H / 3` = **1.280 m**. A standing player is `WALL_H / 2` = **1.920 m**.
+A horizontal opening therefore cannot be walked through, whatever its width.
 
-Half wall (0-5)    Corner left (2,5,8)  Corner right (0,3,6)
-· · ·              # # ·                · # #
-· · ·              # # ·                · # #
-# # #              # # ·                · # #
+| Opening | Tiles | Size | Passable |
+| --- | --- | --- | --- |
+| Door | `4,7` | 1.707 × 2.560 | **Standing** |
+| Arch / three-tile | `1,4,7` | 1.707 × 3.840 | **Standing** |
+| Bottom row | `6,7,8` | 5.120 × 1.280 | Crouched only |
+| Window | `4` | 1.707 × 1.280 | No |
 
-Peek left (3)      Peek right (5)
-# # #              # # #
-· # #              # # ·
-# # #              # # #
-```
-
-**Door** is the highest-traffic edit in the game — it is how a player exits their own box
-without breaking it. It must be reachable as a single downward drag over tiles 6 and 7.
-
-## Floors (§7.4)
-
-Viewed from above, with the player's facing direction toward the top of the grid.
+## Wall — 3 × 3
 
 ```
-Full floor         Centre hole (4)    Quarter hole (0)   Half floor (0,1,3,4)
-# # #              # # #              · # #              · · #
-# # #              # · #              # # #              · · #
-# # #              # # #              # # #              # # #
+ 0 1 2          Door (4,7)      Arch (1,4,7)    Window (4)
+ 3 4 5          # # #           # · #           # # #
+ 6 7 8          # · #           # · #           # · #
+                # · #           # · #           # # #
 
-Full drop (0-8) → the piece is deleted entirely and support is re-evaluated (§6.5)
+Half wall (0-5)  Top row (0,1,2)  Left column (0,3,6)  Corner BL (3,4,6,7)
+· · ·            · · ·            · # #                # # #
+· · ·            # # #            · # #                · · #
+# # #            # # #            · # #                · · #
 ```
 
-`Quarter hole` is also valid at 2, 6, and 8 — the same pattern rotated.
-
-## Ramps (§7.5)
-
-Viewed from above (footprint), ascending toward the top of the grid.
+## Floor — 2 × 2
 
 ```
-Full ramp          Half left (0,3,6)  Half right (2,5,8)
-# # #              · # #              # # ·
-# # #              · # #              # # ·
-# # #              · # #              # # ·
-
-Ramp + platform (6,7,8)   Inverted step (0,1,2)
-# # #                     · · ·
-# # #                     # # #
-· · ·  ← flat landing     # # #
+ 0 1      Quarter (0)   Half north (0,1)   Half west (0,2)
+ 2 3      · #           · ·                · #
+          # #           # #                · #
 ```
 
-`Half left` / `Half right` are the ramp edits that let a player take the high ground while
-keeping a wall's worth of cover on the exposed side.
+Removing all four deletes the piece.
 
-## Cones (§7.6)
+## Cone — 2 × 2
+
+Same grid as the floor, viewed from above. Quadrants of the pyramid; each surviving
+quadrant is a sloped face rising to the apex at the cell centre.
+
+## Ramp — 3 rows × 2 columns
 
 ```
-Full cone          Half cone (0,1,2)  Quarter cone (0,1,2,3)
-# # #              · · ·              · · ·
-# # #              # # #              · # #
-# # #              # # #              # # #
+ [0][1]   top    (highest)
+ [2][3]   middle
+ [4][5]   bottom (lowest)
+
+Half left (0,2,4)   Half right (1,3,5)   Flipped (0,1)   Landing (4,5)
+ · #                 # ·                  · ·             # #
+ · #                 # ·                  # #             # #
+ · #                 # ·                  # #             · ·
 ```
+
+## Collision
+
+Collision is **derived from the pattern**, by the same `PieceGeometry` functions that
+build the visible mesh. There is no stored collider, so a stale one cannot exist — which
+is how `MASTER_SPEC §10.8` ("never leave stale collision from the old orientation") is
+satisfied structurally rather than by a cleanup step.
+
+- Wall and floor → one solid box per remaining tile.
+- Ramp and cone → **height fields**, not stacked boxes. One ramp row rises 1.280 m against
+  a 0.450 m step height, so a stepped collider would wall the player off their own ramp.
 
 ## Rejected selections
 
-Anything not in the tables above leaves the piece unchanged and plays the "invalid edit"
-tick. Notable rejections:
+The tables are allow lists: anything unlisted is rejected by construction. Also rejected
+is any tile index outside the piece's own grid — tile `8` is valid on a wall and invalid
+on a 2×2 floor, and `EditController.dragTile` refuses it.
 
-- Wall `0,1,2` (top row only) — a floating wall segment with nothing holding the top row.
-- Wall `1` alone — a hole with no gameplay purpose that would be a free peek with no
-  tradeoff.
-- Any diagonal-only selection, e.g. `0,4,8`.
-- Floor `1,3,5,7` (a cross) — awkward collision, no use case.
-
-The rejection list is not a blacklist in code. `EditPatterns.js` holds the **allow list**
-above; anything not matching is rejected by construction.
-
-## Timing trace target
-
-| Event | Budget |
-| --- | --- |
-| `G` pressed → edit overlay visible | ≤ 33 ms (one tick) |
-| Drag over 2 tiles | player-bound, ~80 ms |
-| Release → geometry swapped | ≤ 33 ms |
-| **Total, door edit** | **≤ 150 ms** |
-
-Spec ceiling is 250 ms (§7.2). Anything above that and the edit flow feels sticky and the
-mechanic loses its place as a combat verb.
+Tests: `tests/editing.test.js`, and the collision consequences in `tests/acceptance.test.js`.

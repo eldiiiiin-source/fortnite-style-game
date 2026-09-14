@@ -13,15 +13,23 @@ import { cellKey, neighbourCell, OPPOSITE } from './BuildGrid.js';
  * Returns terrain height in metres at the centre of build cell (cx, cz).
  */
 
-/** Does this piece touch terrain directly? */
-function touchesTerrain(piece, terrainHeightAt) {
+/**
+ * Does this piece touch terrain directly?
+ *
+ * The span is widened by one piece thickness at BOTH ends. The upper tolerance lets a piece
+ * buried in the ground count as grounded (§6.3 rule 5 allows the intersection). The lower
+ * one is not cosmetic: POI pads are snapped to a storey line (MAP_SPEC §21.2.1), so a whole
+ * POI's ground storey sits exactly ON this boundary, and an exact comparison then turns on
+ * floating-point noise — Hollow Farm's fence corner sits 0.3 mm below its pad and was
+ * "floating". A piece resting on the ground is grounded; a third of a millimetre is not a
+ * structural fact.
+ */
+export function touchesTerrain(piece, terrainHeightAt) {
   if (!terrainHeightAt) return piece.cell.cy === 0; // flat world fallback: layer 0 is grounded
   const groundY = terrainHeightAt(piece.cell.cx, piece.cell.cz);
   const cellBase = piece.cell.cy * BUILD.wallHeight;
   const cellTop = cellBase + BUILD.wallHeight;
-  // Terrain passes through this cell's vertical span, so the piece is buried in it (§6.3
-  // rule 5 allows the intersection) and therefore grounded.
-  return groundY >= cellBase && groundY < cellTop + BUILD.thickness;
+  return groundY >= cellBase - BUILD.thickness && groundY < cellTop + BUILD.thickness;
 }
 
 /**
@@ -46,6 +54,14 @@ export function supportersOf(piece, grid) {
     // A ramp or cone in the cell below holds a floor up.
     push(grid.getPiece(below, 'ramp'));
     push(grid.getPiece(below, 'cone'));
+    // A ramp in the NEIGHBOURING cell one layer down, ascending back toward this floor, tops
+    // out exactly at this floor's edge and carries it. Without this a ramp-then-floor — the
+    // commonest build in the game, and what every pitched roof in the world is made of —
+    // has nothing holding its landing up.
+    for (const dir of ['north', 'east', 'south', 'west']) {
+      const ramp = grid.getPiece({ ...neighbourCell(piece.cell, dir), cy: cy - 1 }, 'ramp');
+      if (ramp && ramp.direction === OPPOSITE[dir]) push(ramp);
+    }
     // An adjacent floor at the same layer.
     for (const dir of ['north', 'east', 'south', 'west']) {
       push(grid.getPiece(neighbourCell(piece.cell, dir), 'floor'));

@@ -1,0 +1,563 @@
+# SKIN / CHARACTER APPEARANCE SPEC
+
+| Field | Value |
+| --- | --- |
+| Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
+| Version | 1.4.1 |
+| Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
+| Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
+| Implementation | Complete |
+
+> **Originality is a hard requirement.** Every name, silhouette, palette and theme in this
+> document is original to this project. Nothing here reproduces any shipped game's
+> characters, outfit designs, names, logos or art. Where the brief names a genre reference
+> ("battle-royale-style"), it refers to the *readability standard* — clean silhouettes,
+> stylised proportions, saturated palettes — not to any specific existing character.
+
+---
+
+## 1. Goal
+
+Outfits are the most-looked-at cosmetic in the game: the player sees their own from behind
+for an entire match, and sees everyone else's at a distance under time pressure. A skin
+therefore has two jobs, in this order:
+
+1. **Read instantly.** Distinct silhouette first, colour second, detail last.
+2. **Look appealing.** Stylised, cartoon-adjacent proportions with clean shapes — not
+   realistic, not crude.
+
+A skin that is merely a recoloured default fails this spec even if it is pretty.
+
+## 2. Target style
+
+- Bright, stylised third-person battle-royale aesthetic.
+- Clean readable silhouettes — identifiable as a black shape at 40 m.
+- Polished, slightly heroic proportions; cartoony but not chibi, except where a skin's
+  theme deliberately chooses stubby proportions (mascots).
+- Saturated primaries with a restrained accent, rather than many competing hues.
+- Distinctive rarity presentation in the UI (§8).
+
+## 3. The character rig
+
+### 3.1 One geometry source
+
+A skin is **data**. Both the in-match 3D character and the 2D shop/locker/lobby preview are
+generated from that same data by `cosmetics/CharacterRig.js`, which emits an ordered list of
+abstract parts. Neither renderer defines a shape of its own.
+
+This mirrors `building/PieceGeometry.js` (`CLAUDE.md`: *"Geometry has one source"*): the
+preview and the in-match character cannot drift apart, because there is only one shape
+definition and two consumers of it.
+
+```
+SkinDefinitions.js  →  CharacterRig.buildCharacterRig(skin)  →  parts[]
+                                                                  ├── world/CharacterView.js  (three.js, in match)
+                                                                  └── ui/components/CharacterPainter.js  (canvas, previews)
+```
+
+### 3.2 Rig space
+
+Parts are emitted in **metres**, in a right-handed space whose origin is the character's
+foot centre: `+Y` up, `+Z` forward (the direction the character faces), `+X` to the
+character's left.
+
+Every dimension derives from `CHARACTER` in `src/core/Config.js`, which derives in turn from
+`MOVEMENT.standHeight` and `MOVEMENT.capsuleRadius` — themselves derived from the build
+module (`MASTER_SPEC §9.1.1`). Retuning `TILE` or `WALL_H` rescales every character
+coherently. **No skin file contains an absolute dimension.**
+
+### 3.3 Part shape vocabulary
+
+| Shape | Fields | Notes |
+| --- | --- | --- |
+| `box` | `size {x,y,z}` | The workhorse; most armour and limbs |
+| `sphere` | `radius` | Heads, puffs, lantern globes |
+| `cone` | `radius`, `height` | Hoods, horns, fins |
+| `cylinder` | `radius`, `radiusTop`, `height` | Tanks, poles, ponytails |
+| `wedge` | `size {x,y,z}` | Visors, brims, shoulder slopes |
+
+Every part also carries `pos {x,y,z}`, an optional `rot {x,y,z}` in radians, a `role`
+naming which palette colour paints it (§4), and a `tag` naming the body region it belongs to
+(`torso`, `head`, `armL`, `legR`, …) so animation can address parts without knowing the
+skin.
+
+### 3.4 Collision is untouched
+
+The rig is **visual only**. The collision capsule remains `MOVEMENT.capsuleRadius` /
+`MOVEMENT.standHeight` for every skin without exception, satisfying `ITEM_SHOP_SPEC §4.4`
+(*"all outfits share one collision profile"*). A skin with a tall hat is not taller. This is
+asserted by test, not merely stated.
+
+## 4. Palette roles
+
+A skin declares a **role map**, not a colour list. Roles let one feature builder paint
+itself correctly across every skin.
+
+| Role | Paints |
+| --- | --- |
+| `primary` | The dominant outfit mass — torso, upper legs |
+| `secondary` | Supporting garment — sleeves, lower legs, hood lining |
+| `accent` | The loud, small-area colour — stripes, glow, trim, laces |
+| `skin` | Exposed skin — face, hands, neck |
+| `hair` | Hair, fur, plumes |
+| `detail` | Straps, buckles, boots, belts — the dark unifier |
+| `visor` | Visors, goggles, lenses, eyes |
+
+**Rule:** `accent` must occupy a small fraction of the silhouette. A skin whose accent is
+also its primary has no accent.
+
+## 5. Build archetypes
+
+`build` sets the body proportions before features are applied. This is where silhouette
+separation begins — two skins with different builds are distinguishable as shapes before a
+single feature is added.
+
+| Build | Character | Shoulder | Torso | Leg | Head |
+| --- | --- | --- | --- | --- | --- |
+| `lean` | Slight, quick | narrow | narrow, long | thin | standard |
+| `athletic` | Default heroic | medium | medium | medium | standard |
+| `heavy` | Armoured, imposing | broad | broad, short | thick | slightly small |
+| `stout` | Mascot, comic | medium | short, round | short | oversized |
+
+## 6. Silhouette features
+
+Features are named, reusable builders. A skin lists the ones it wears. Each is a shape that
+changes the **outline**, which is what makes skins readable — a decal never would.
+
+| Feature | Silhouette change |
+| --- | --- |
+| `hood` | Raised cone-back over the head, shoulders squared |
+| `helmet` | Hard shell above the brow line, flat crown |
+| `visorBand` | Horizontal lens band across the eyes |
+| `goggles` | Two lenses on a strap, sat on the brow |
+| `ponytail` | Long mass swinging off the back of the skull |
+| `longHair` | Broad mass down past the shoulders, asymmetric |
+| `hairTuft` | Short upward tuft |
+| `earPuffs` | Two round masses either side of the head (mascot) |
+| `mascotHead` | Oversized round head that dominates the outline |
+| `shoulderPads` | Rounded pads widening the shoulder line |
+| `plateCarrier` | Boxy chest slab with a raised collar |
+| `chestRig` | Pouch row across the chest |
+| `scarf` | Neck mass with a trailing tail |
+| `cape` | Hanging back panel |
+| `hemSkirt` | Flared panel below the waist |
+| `tatteredHem` | Ragged asymmetric hanging strips |
+| `shinGuards` | Hard plates on the lower leg |
+| `bracers` | Forearm cuffs |
+| `backTank` | Cylindrical canister on the back |
+| `spineFin` | Vertical fin running up the spine |
+| `antenna` | Thin stalk with a tip bulb |
+| `stitchSeams` | Contrast seam lines across torso and limbs |
+
+### 6.1 Operator kit
+
+The premium tier needs denser kit than a hood and a pair of bracers. These features are
+what let an outfit read as *equipment* rather than as clothing.
+
+| Feature | Silhouette change |
+| --- | --- |
+| `aviatorCap` | Leather skull cap with ear flaps down the jaw and a chin strap |
+| `browGoggles` | Goggles pushed **up** onto the brow, leaving the face readable |
+| `headWrap` | Soft cloth wrap, taller than a cap, knotted off to one side |
+| `tankTop` | Sleeveless — repaints the arms as bare skin and adds a narrower vest |
+| `fingerlessGloves` | Glove at the wrist and palm, skin below it |
+| `thighRig` | Strapped thigh pouches, deliberately on one leg only |
+| `kneePads` | Hard caps at the knee |
+| `combatBoots` | Tall boots with a cuff and a raised sole |
+| `utilityBelt` | Belt, buckle and a hip pouch at the waist line |
+| `shoulderStrap` | One diagonal baldric across the chest, breaking the mirror |
+| `neckWrap` | Thick neck wrap with a fold |
+| `faceMarkings` | Painted brow flashes, cheek marks and a jaw line |
+| `skullMask` | Face plate with deep sockets |
+| `bonePattern` | Self-lit ribs, sternum, spine and limb bones |
+
+A feature may **repaint** parts the base body placed, not only add to them. Some garments
+are defined by what they remove — a tank top is bare arms, not an added sleeve — and
+without repainting, a sleeveless outfit would need a second base body.
+
+### 6.2 Self-lit parts
+
+Any part may be marked `glow`. The 3D view gives it an emissive material; the 2D painter
+draws a bloom behind it. This is a **material flag, not a rarity effect**: a common item
+may use it and a legendary one need not. It never changes how visible a player is to
+another player at gameplay distance.
+
+### 6.4 Costume layering
+
+**[OWNER] fidelity pass, 2026-09-14.** A premium outfit is not one garment; it is garments
+*over* garments. The features below exist to build that stack, and the signature four are
+required to carry it (§9.12).
+
+| Feature | Layer it adds |
+| --- | --- |
+| `shoulderCaps` | Rounded deltoid caps that round off the shoulder corner |
+| `torsoTaper` | Chest-to-waist overlay that narrows the trunk |
+| `beltRig` | Layered waist: belt, buckle, side pouches, hanging strap |
+| `hipFlaps` | Asymmetric flaps hanging from the hip line |
+| `armWraps` | Wrapped forearms, one heavier than the other |
+| `thighStraps` | Cinch straps around the upper leg |
+| `assaultHelmet` | Domed helmet with a rear shroud and a rail |
+| `sweptHair` | Long asymmetric hair: back mass, forward lock, swept crown |
+| `paintedGrin` | Painted mouth and cheek marks |
+
+**Rule:** layering must read as *stacked*, not as *painted*. Every feature here changes the
+outline or casts over another part; none of them is a flat decal on a flat face.
+
+### 6.5 Bevelled parts
+
+A box part may set `bevel`. The 3D view chamfers its corners; the 2D painter draws it with
+cut corners instead of square ones.
+
+This exists because the single loudest "placeholder" signal in a stylised character is a
+stack of hard-edged rectangles. A bevel costs one flag and removes that read. It is opt-in
+per part so existing cosmetics are untouched.
+
+### 6.3 Emissive structural pattern exception
+
+**[OWNER] Approved 2026-09-14, with restriction.**
+
+A cosmetic may exceed the normal accent percentage (§9.5) **only** when all of the
+following hold:
+
+1. The emissive pattern is a core **silhouette / readability** feature — the pattern is
+   what the character *is*, not decoration applied to it.
+2. The non-emissive base remains **visually dominant** enough to preserve character form.
+3. The emissive material does **not significantly increase visibility** in normal gameplay.
+4. The effect does **not obscure body proportions**.
+5. The effect creates **no gameplay advantage**.
+6. The exception is **explicitly declared** in the cosmetic definition.
+
+> **Legendary rarity alone is NOT sufficient reason to exceed the normal accent limit.**
+> Rarity is not an input to this rule. A legendary skin with ordinary decorative accenting
+> is refused exactly as a common one would be, and a common skin meeting every condition
+> is admitted.
+
+The conditions are enforced as measurements in `cosmetics/CosmeticRules.js`, not as
+review prose, because a narrow exception is easy to widen by accident:
+
+| Condition | Measurement | Threshold |
+| --- | --- | --- |
+| Declared | `skin.accentException === 'emissiveStructuralPattern'` | required |
+| Structural, not decorative | accent share of **non-emissive** parts | ≤ 25% |
+| Pattern exists | emissive part count | ≥ 1 |
+| Base visually dominant | non-emissive share of frontal **area** | ≥ 65% |
+| Base visually dominant | non-emissive share of parts | ≥ 55% |
+| No visibility gain | emissive share of frontal area | ≤ 25% |
+| Reads against its base | `primary` luminance | ≤ 0.30 |
+| Proportions preserved | every body region retains non-emissive geometry | required |
+
+Frontal **area** is used rather than part count wherever the condition is about what the
+player sees: four thin rib strips and four broad plates are the same count and nothing
+like the same amount of glow on screen.
+
+A declaration on a cosmetic that does not need it is also a failure — it would let the
+exception spread by habit.
+
+**Approved under this exception: `outfit_voidmarrow` only.**
+
+Features compose: a skin is its build plus three to six features. **No two skins in the
+roster may share the same (build, feature-set) pair** — asserted by test (§9).
+
+## 7. The roster
+
+Sixteen outfits. IDs are permanent — profiles store them (`ITEM_SHOP_SPEC §4.2`).
+
+### 7.1 Founding eight
+
+Carried over from the launch catalog, now rigged rather than recoloured.
+
+| ID | Name | Rarity | Theme |
+| --- | --- | --- | --- |
+| `outfit_recruit` | Recruit | Common | Standard issue field gear |
+| `outfit_drifter` | Drifter | Common | Long-road traveller |
+| `outfit_signal` | Signal | Uncommon | High-visibility work crew |
+| `outfit_tidewatch` | Tidewatch | Uncommon | Coastal patrol |
+| `outfit_ironleaf` | Ironleaf | Rare | Forest plating (Wildline set) |
+| `outfit_emberkin` | Emberkin | Rare | Banked-fire warmth |
+| `outfit_nightvane` | Nightvane | Epic | Final-circle specialist |
+| `outfit_aurelian` | Aurelian | Legendary | Gilded champion |
+
+### 7.2 New eight
+
+| ID | Name | Rarity | Theme | Silhouette hook |
+| --- | --- | --- | --- | --- |
+| `outfit_dunewake` | Dunewake | Common | Desert drifter | Wrapped scarf with a long trailing tail |
+| `outfit_voltrun` | Voltrun | Uncommon | Sporty, bright | High ponytail, track-stripe legs |
+| `outfit_bramblejack` | Bramblejack | Uncommon | Feral woodland scrapper | Hood with a spine fin |
+| `outfit_greyline` | Greyline | Rare | Tactical urban | Helmet, plate carrier, shin guards |
+| `outfit_rustward` | Rustward | Rare | Rugged scavenger | Hood, goggles, back tank, heavy build |
+| `outfit_hexwilt` | Hexwilt | Epic | Spooky revenant | Long teal hair, tattered hem, stitch seams |
+| `outfit_sprocket` | Sprocket | Epic | Fun mascot | Oversized round head, ear puffs, antenna |
+| `outfit_paleaxis` | Pale Axis | Legendary | Sleek futurist | Full visor band, cape, lean plating |
+
+**Hexwilt** is the brief's named request: teal hair, pink accents, a stitched patchwork
+revenant. It is an original character — the theme (a cheerful undead in a stitched coat) is
+a genre staple, and the specific design, name, palette and silhouette here are this
+project's own.
+
+### 7.3 The signature four
+
+The premium tier: denser kit, stronger colour identity, more silhouette per figure. These
+carry the shop. Each was designed from a mood brief as an **original character** built from
+this project's own rig, palette roles and feature vocabulary.
+
+| ID | Name | Rarity | Theme |
+| --- | --- | --- | --- |
+| `outfit_vexbloom` | Vexbloom | Epic | Neon revenant |
+| `outfit_goldspar` | Goldspar | Legendary | Elite aviator |
+| `outfit_voidmarrow` | Voidmarrow | Legendary | Glowing skeleton |
+| `outfit_coalcrest` | Coalcrest | Epic | Gilded operator |
+
+Revised in 1.3.0 by the owner's fidelity pass. IDs, rarity and pricing are unchanged; only
+the geometry and the layering moved.
+
+**Vexbloom** — hot pink skin against cyan cloth, two saturated hues at opposite ends of the
+wheel with everything else pushed neutral so they stay the whole story. Lean frame. Swept
+asymmetric hair with a forward lock, cyan wrap, goggles pushed to the brow, painted grin
+and cheek marks, sleeveless vest over a tapered trunk, shoulder caps, cross strap, layered
+belt rig, wrapped forearms. The asymmetry is deliberate and constant: hair, strap and belt
+each break the mirror in a different place.
+
+**Goldspar** — matte black carries the mass; gold appears only at buckles, soles, trim and
+cap fittings, which is what keeps it reading as expensive rather than as costume. Lean
+frame. Aviator cap with rear shroud and jaw flaps, brow goggles on a gold-ringed mount,
+sleeveless with a tapered trunk and shoulder caps, fingerless gloves, layered belt rig,
+asymmetric hip flap, thigh rig with cinch straps, tall combat boots with gold soles.
+
+**Voidmarrow** — a near-black base so the self-lit violet bones are the only thing the eye
+lands on. Athletic frame. Anatomical stylised skeleton: collar, sternum, a tapering rib
+cage, a pelvic girdle, femurs, tibias, humerus and forearm bones, and a spine with a solid
+backing so the glow never floats. Skull mask with a pronounced brow ridge, cheekbones and a
+separated jaw. Every bone sits over solid geometry — the body reads beneath the glow.
+
+**Coalcrest** — Goldspar's palette on a heavy frame: same colours, different mass, so the
+two read as a matched set (`Gilded Vanguard`) without either looking like a recolour.
+Assault helmet with rear shroud and rail, heavy neck wrap, sleeveless over a broadened
+tapered chest, shoulder caps, diagonal baldric with clip, layered belt rig, hip flaps,
+wrapped forearms, knee pads. Deliberately the broadest silhouette of the four.
+
+### 7.4 Rarity distribution
+
+| Rarity | Count |
+| --- | --- |
+| Common | 3 |
+| Uncommon | 4 |
+| Rare | 4 |
+| Epic | 5 |
+| Legendary | 4 |
+
+Legendary stays the scarcest earned tier relative to the whole roster; the premium tier is
+where the shop's appeal lives, so epic carries the most weight.
+
+## 8. Rarity presentation
+
+Rarity affects **presentation only** (`ITEM_SHOP_SPEC §4.3`) — never stats, never
+silhouette, never size.
+
+| Tier | Preview backdrop | Pedestal | Extra |
+| --- | --- | --- | --- |
+| Common | Flat dark wash | Plain disc | — |
+| Uncommon | Soft radial in rarity hue | Plain disc | — |
+| Rare | Radial + horizon band | Ringed disc | — |
+| Epic | Radial + band + corner rays | Ringed disc | Slow shimmer sweep |
+| Legendary | Full aura + rays | Double ring | Shimmer sweep + drifting motes |
+
+The 3D in-match character receives **no** rarity effect. A legendary skin must not glow in
+the world — it would be a gameplay tell and hand paying players an advantage, violating
+`ITEM_SHOP_SPEC §4.4` in spirit if not in letter.
+
+## 9. Required tests
+
+1. Every skin in the roster produces a rig with at least one part in every body region.
+2. No skin's rig exceeds the collision capsule's dimensions in a way that would imply a
+   different hitbox — the capsule constants are identical for every equipped skin.
+3. Every skin's (build, features) pair is unique.
+4. Every skin declares all seven palette roles, with valid hex colours.
+5. `accent` never paints more than a quarter of a rig's parts, **unless** the cosmetic
+   declares and satisfies the emissive structural pattern exception (§6.3). Every skin is
+   evaluated by `evaluateAccentRule`, and an undeclared skin over the limit fails —
+   whatever its rarity.
+
+   > Amended in 1.2.0 at the owner's direction. 1.1.0 blanket-excluded glow parts from the
+   > count, which was too broad: it would have admitted any future skin that sprayed
+   > emissive accenting around, on rarity or on taste. The limit is now a real limit with
+   > one narrow, declared, measured exception.
+
+6. Rig construction is deterministic — the same skin yields an identical part list.
+7. Every rarity tier in the roster is represented and matches the §7.3 distribution.
+8. Every roster outfit is purchasable and equippable through the existing shop/locker path.
+9. All rig dimensions scale with the build module: doubling `standHeight` doubles the rig.
+10. A skin using `bonePattern` keeps a dark base — its `primary` luminance stays low
+    enough that the glow reads against it.
+10a. No skin exceeds the accent limit without a declared §6.3 exception, and a declared
+    exception that fails any §6.3 condition is a failure. Rarity never appears in the
+    decision: a synthetic legendary over the limit is refused.
+11. Every harvesting tool builds a rig with a haft and a head, and no tool carries a
+    gameplay field.
+12. Each of the signature four carries real costume layering: a minimum part count, parts
+    in every body region, at least one asymmetric element, and bevelled geometry.
+13. The fidelity pass preserves save compatibility: every roster ID, rarity and price is
+    unchanged by it.
+
+## 10. Where skins render
+
+| Surface | Source | Notes |
+| --- | --- | --- |
+| Lobby | `CharacterPainter` via `CosmeticPreview` | Equipped outfit, full figure, rarity backdrop |
+| Shop | `CharacterPainter` via `CosmeticPreview` | Selected item, rarity backdrop; cards use thumbnails |
+| Locker | `CharacterPainter` via `CosmeticPreview` | Selected item, rarity backdrop |
+| Match | `CharacterView` via `Renderer` | Equipped outfit on the third-person avatar |
+
+## 11. Harvesting tools
+
+A harvesting tool is a rig, exactly as a character is: data in, part list out, one 3D view
+and one 2D painter consuming it. `cosmetics/ToolDefinitions.js` holds the roster,
+`cosmetics/ToolRig.js` builds the parts.
+
+### 11.1 Rig space and scale
+
+Origin is the **grip** — the point the hand closes on — with `+Y` up the haft toward the
+head and `+Z` the striking face. Anchoring at the grip rather than the butt means a long
+tool and a short one both sit correctly in the same hand. Dimensions come from
+`PICKAXE_VIEW` in Config, derived from the character, so a build-module retune rescales
+tools with their wielder.
+
+`PICKAXE_VIEW` is cosmetic only. Damage, reach and swing rate are `PICKAXE`, and are
+**identical for every equipped tool** (`ITEM_SHOP_SPEC §4.4`).
+
+### 11.2 Head forms
+
+`wedge` (plain issue pick), `chisel` (flat quarry bit), `leaf` (tapered blade), `hook`
+(curved sea hook), `split` (twin tine), `beam` (energy edge), `scrap` (welded plate).
+
+### 11.3 Haft styles
+
+`straight`, `wrapped` (grip wrap at the hand), `pipe` (salvaged tube with a cut collar),
+`salvage` (bent tube, taped grip, welded collar, hanging chain).
+
+### 11.3.1 Per-tool head scale
+
+A tool may declare `headScale` to run its head larger or smaller than the roster default.
+It is a **view** value with no gameplay reach — reach and damage stay in `PICKAXE` for
+every tool — and it exists because a signature tool has to carry a shop card that a common
+one does not.
+
+### 11.4 Tool details
+
+`bolts`, `binding`, `counterweight`, `spikes`, `rags`, `glowEdge`, `weldPlates` (stacked
+riveted plates), `chainLash` (chain hanging from the collar).
+
+### 11.5 Scrapjaw
+
+The signature tool, sitting beside the premium outfits. Epic. Revised in 1.3.0.
+
+- **Palette** — dark steel body (`#4a525c`), rust-red plate (`#a8412a`), worn bare metal at
+  the edge (`#b9c2cc`), near-black haft (`#241b14`).
+- **Silhouette** — deliberately asymmetric and layered, and now oversized: the head runs at
+  `headScale` above the roster default so it dominates a shop card. A stack of welded
+  plates over a backing bar, a broad cleaver edge overhanging one side, a long tapered
+  counter-spike opposing it, a shim wedged behind, and a torn plate riveted across the
+  joint. The asymmetry *is* the silhouette; a symmetrical scrap head just reads as a
+  hammer, and the cutting edge and the counter-spike must never read as the same shape.
+- **Material** — pipe haft with a taped grip and a cut collar, cord lashing at the joint,
+  welded spikes along the back, a hanging rag.
+- **Flavour** — *"Four things that failed at their old jobs, welded into one that does not."*
+
+### 11.6 Where tools render
+
+Shop, locker and lobby previews paint the tool rig on the diagonal. In match, the tool is
+parented to the character's right hand, read off the rig's own hand position so a heavy
+frame's tool sits further out than a lean frame's.
+
+**The carry pose is a HELD TOOL, not a back accessory.** When the player is not swinging —
+idle, walking, sprinting, crouching — the tool hangs in the hand at the side, head angled
+down and a little forward. It must never sit across the back or the flank: a tool tipped
+up behind the shoulder lies over the character's own silhouette, which is the one thing a
+third-person avatar cannot afford.
+
+Stated as constraints, all of which hold for every outfit carrying every tool:
+
+- The head stays in FRONT of the character, never behind.
+- The head points downward, never upward.
+- The head stays outboard of the torso and below the shoulder, so it covers neither the
+  body nor the crosshair.
+- The head clears the ground.
+- The haft butt may sit beside the hip but never passes through the body.
+- Every tool carries at the SAME angle. Tools differ only in looks (ITEM_SHOP_SPEC §4.4),
+  so a pose that varied by tool would read as a difference in reach.
+
+The pose is authored as a DIRECTION — down and outward — and the rotation is solved from
+it, because the direction is what the pose means. The tilt is clamped to what each rig can
+carry: the stout build's hand sits barely a third of a metre off the ground, so its tool
+levels off rather than dragging through the floor.
+
+There is no swing animation in the view layer. This pose is the only transform a tool
+receives, and swing timing, damage and reach are gameplay values that none of it touches.
+
+### 11.7 The swing animation [OWNER-derived]
+
+Swinging a tool must read as a swing. The carry pose (§11.6) is the rest state; a strike
+lifts the tool overhead, drives it down and forward through the target, and settles back.
+
+**Gameplay is authoritative. The animation never is.** It is driven by
+`Pickaxe.swingProgress` — a READ of the swing cooldown, normalised to 0 at the strike and
+1 once recovered. There is no second clock, so the animation cannot change the swing rate,
+the damage, the range or the hit test.
+
+**The visual strike is timed to the hit.** Damage resolves the instant the swing is called,
+at progress 0, so the arc reaches its strike as early as an arc can: peak wind-up at 0.05,
+impact at **0.10** — 55 ms behind the hit at the current swing interval. It cannot be at 0
+exactly; a swing with no wind-up in it reads as a twitch rather than as a strike.
+
+The cost of that sync is frame count, and it is worth stating plainly: at 0.55 s and 60 fps
+a swing is 33 rendered frames, so the wind-up and the strike get under two frames each. The
+motion is deliberately snappy, and the follow-through and the long settle back to carry are
+what carry its readability. Moving the impact earlier still would spend the wind-up
+entirely; moving it later re-opens the sync gap.
+
+The arm rotates about the SHOULDER and the tool rides in its hand, so one joint carries
+both. Animating a tool apart from the arm holding it slides it out of the hand.
+
+Constraints, held for every outfit carrying every tool, at every frame:
+
+- The arc starts and ends on the carry pose EXACTLY, so repeated swings loop without a snap
+  and dropping the pickaxe mid-swing returns to rest immediately.
+- The tool stays in front of the character throughout. The camera trails the player, so a
+  swing that reaches behind fills the view with the tool.
+- It passes above the head, never through it, and never through the torso.
+- The head never goes below the ground, recovery included.
+- No transform is ever NaN, for any progress, including out-of-range and junk input.
+
+One wind-up needs roughly -2.15 rad at the shoulder to carry the head overhead: a tool
+hanging head-down only reaches shoulder height at -1.2, which reads as reaching forward
+rather than as a swing.
+
+## 12. Render fidelity
+
+Flat fills read as placeholder art. One lighting model is applied to whatever any rig
+emits — never per-item artwork, which is why adding a cosmetic never means drawing one.
+
+| Technique | Why |
+| --- | --- |
+| Three-face shading — lit top, mid front, shaded lower edge | Stacked boxes stop reading as one flat slab |
+| Lift-toward-white highlights instead of a flat multiply | A near-black outfit keeps its form instead of going to pure black on every face |
+| Darkening with a floor | A black part never becomes a hole in the silhouette |
+| Gradient across spheres and cylinders | Curvature, rather than discs and rectangles |
+| Bloom behind self-lit parts | Glow reads as emission, not as bright paint |
+| Two-layer contact shadow | Sits the figure on the ground instead of stickering it on |
+| Dark stage pool behind the figure | A skin whose palette matches its rarity hue keeps its edges |
+| Chamfered corners on bevelled parts (§6.5) | A stack of hard rectangles is the loudest placeholder signal there is |
+
+---
+
+## Changelog
+
+| Version | Date | Change |
+| --- | --- | --- |
+| 1.4.1 | 2026-09-14 | §11.7: visual strike retimed from progress 0.32 to 0.10, cutting the gap between the gameplay hit and the visible impact from 176 ms to 55 ms. Arc, poses and gameplay timing unchanged — keyframe times only. |
+| 1.4.0 | 2026-09-14 | Adds §11.7: a visual swing animation for harvesting tools — overhead wind-up, strike through the target, settle back to the carry pose — driven by `Pickaxe.swingProgress`, a read of the gameplay cooldown, so no gameplay timing, damage, range or hit test changes. |
+| 1.3.1 | 2026-09-14 | §11.6: harvesting tools are carried in the hand at the side, angled down and forward, instead of tipped up behind the shoulder where they lay across the character's silhouette. Pose authored as a direction and clamped per rig. |
+| 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |
+| 1.3.0 | 2026-09-14 | [OWNER] Fidelity pass on the signature four and Scrapjaw: costume layering vocabulary (§6.4), bevelled parts (§6.5), revised silhouettes (§7.3), salvage haft, per-tool head scale and a rebuilt Scrapjaw head (§11). IDs, rarity and pricing unchanged. |
+| 1.2.0 | 2026-09-14 | [OWNER] Emissive structural pattern exception (§6.3): the accent limit is a real limit again, with one narrow declared and measured exception. Rarity is explicitly not a qualifying reason. Voidmarrow approved under it. |
+| 1.1.0 | 2026-09-14 | Operator-kit features and self-lit parts (§6.1, §6.2); the signature four (§7.3); harvesting tools as rigs, with Scrapjaw (§11); render fidelity model (§12). Accent rule amended to count non-glow parts only (§9.5). |

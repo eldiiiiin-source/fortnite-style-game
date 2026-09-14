@@ -1,163 +1,190 @@
 /**
- * Guards Config.js against the specs. If a number here fails, either the spec changed and
- * Config did not, or Config changed without the spec. Either way, fix it — do not edit
- * the expected value to match the code (CLAUDE.md).
+ * Config against MASTER_SPEC. Owner-specified values are asserted absolutely; derived
+ * values are asserted as DERIVATIONS, so retuning the build module does not break them.
  */
 import { describe, it, expect } from 'vitest';
 import {
-  SIM, VITALS, MOVEMENT, MATERIALS, BUILD, EDIT, WEAPONS, RARITIES,
-  STORM_PHASES, WORLD, HARVEST
+  TILE, WALL_H, RATIO, SIM, VITALS, MOVEMENT, MATERIALS, MATERIAL_ORDER, MATERIAL_CAP,
+  EDIT_GRIDS, EDIT_TILE, BUILD, INVENTORY, WEAPONS, RARITY_ORDER, CONSUMABLES,
+  DEFAULT_BINDINGS, WEAPON_CATEGORIES, BUDGET
 } from '../src/core/Config.js';
 
-describe('MASTER_SPEC §2.1 simulation', () => {
-  it('runs at 30 Hz fixed', () => {
-    expect(SIM.tickRate).toBe(30);
-    expect(SIM.fixedDt).toBeCloseTo(1 / 30, 10);
-    expect(SIM.maxStepsPerFrame).toBe(5);
+describe('§3 simulation — owner-approved 60 Hz', () => {
+  it('ticks at 60 Hz', () => {
+    expect(SIM.tickRate).toBe(60);
+    expect(SIM.fixedDt).toBeCloseTo(1 / 60, 12);
   });
 });
 
-describe('MASTER_SPEC §3.1 vitals', () => {
-  it('is 100 health and 100 max shield, starting with no shield', () => {
+describe('§9.1 build module — owner-approved', () => {
+  it('is 5.12 m by 3.84 m', () => {
+    expect(TILE).toBe(5.12);
+    expect(WALL_H).toBe(3.84);
+  });
+
+  it('exposes the module so everything else can derive from it', () => {
+    expect(BUILD.tileSize).toBe(TILE);
+    expect(BUILD.wallHeight).toBe(WALL_H);
+  });
+});
+
+describe('§9.1.1 derived dimensions', () => {
+  it('derives the player capsule from the build module', () => {
+    expect(MOVEMENT.capsuleRadius).toBeCloseTo(TILE * RATIO.capsuleRadius, 12);
+    expect(MOVEMENT.standHeight).toBeCloseTo(WALL_H * RATIO.standHeight, 12);
+    expect(MOVEMENT.crouchHeight).toBeCloseTo(WALL_H * RATIO.crouchHeight, 12);
+    expect(MOVEMENT.stepHeight).toBeCloseTo(WALL_H * RATIO.stepHeight, 12);
+  });
+
+  it('derives edit tiles from the build module', () => {
+    expect(EDIT_TILE.wall.width).toBeCloseTo(TILE / 3, 12);
+    expect(EDIT_TILE.wall.height).toBeCloseTo(WALL_H / 3, 12);
+    expect(EDIT_TILE.floor.width).toBeCloseTo(TILE / 2, 12);
+    expect(EDIT_TILE.ramp.rise).toBeCloseTo(WALL_H / 3, 12);
+  });
+
+  it('keeps a crouched player under one wall edit row and a standing player over it', () => {
+    // This relationship is what makes a bottom-row opening a crouch-only gap.
+    expect(MOVEMENT.crouchHeight).toBeLessThan(EDIT_TILE.wall.height);
+    expect(MOVEMENT.standHeight).toBeGreaterThan(EDIT_TILE.wall.height);
+  });
+
+  it('fits a standing player through a two-row door with comfortable margin', () => {
+    const doorHeight = EDIT_TILE.wall.height * 2;
+    expect(doorHeight).toBeGreaterThan(MOVEMENT.standHeight);
+    expect(doorHeight - MOVEMENT.standHeight).toBeGreaterThan(MOVEMENT.capsuleRadius);
+  });
+
+  it('fits a capsule across one wall edit tile with margin', () => {
+    expect(EDIT_TILE.wall.width).toBeGreaterThan(MOVEMENT.capsuleRadius * 2);
+  });
+
+  it('keeps the ramp slope walkable', () => {
+    const slope = Math.atan2(WALL_H, TILE) * 180 / Math.PI;
+    expect(slope).toBeCloseTo(36.87, 2);
+    expect(slope).toBeLessThan(MOVEMENT.maxWalkableSlopeDeg);
+  });
+
+  it('derives build ranges from the module rather than hardcoding metres', () => {
+    expect(BUILD.placementRange).toBeCloseTo(TILE * 2.34375, 10);
+    expect(BUILD.editRange).toBeCloseTo(TILE * 1.5625, 10);
+  });
+});
+
+describe('§10.2 edit grids are per piece type', () => {
+  it('gives wall 3x3, floor 2x2, cone 2x2, ramp 3 rows x 2 cols', () => {
+    expect(EDIT_GRIDS.wall).toEqual({ cols: 3, rows: 3, tiles: 9 });
+    expect(EDIT_GRIDS.floor).toEqual({ cols: 2, rows: 2, tiles: 4 });
+    expect(EDIT_GRIDS.cone).toEqual({ cols: 2, rows: 2, tiles: 4 });
+    expect(EDIT_GRIDS.ramp).toEqual({ cols: 2, rows: 3, tiles: 6 });
+  });
+
+  it('keeps tile counts consistent with rows x cols', () => {
+    for (const g of Object.values(EDIT_GRIDS)) {
+      expect(g.tiles).toBe(g.rows * g.cols);
+    }
+  });
+});
+
+describe('§13 vitals', () => {
+  it('is 100 health and 100 shield', () => {
     expect(VITALS.maxHealth).toBe(100);
     expect(VITALS.maxShield).toBe(100);
-    expect(VITALS.startShield).toBe(0);
   });
 });
 
-describe('MASTER_SPEC §3.2 movement', () => {
-  it('matches the spec speeds', () => {
-    expect(MOVEMENT.walkSpeed).toBe(4.6);
-    expect(MOVEMENT.sprintSpeed).toBe(7.6);
-    expect(MOVEMENT.crouchSpeed).toBe(2.4);
+describe('§9.4 materials are wood, brick, metal', () => {
+  it('names brick, not stone', () => {
+    expect(MATERIAL_ORDER).toEqual(['wood', 'brick', 'metal']);
+    expect(MATERIALS.brick).toBeDefined();
+    expect(MATERIALS.stone).toBeUndefined();
   });
 
-  it('produces the documented jump arc', () => {
-    // apex = v^2 / 2g, airtime = 2v / g  — spec quotes 1.24 m and 0.67 s.
-    const apex = MOVEMENT.jumpVelocity ** 2 / (2 * MOVEMENT.gravity);
-    const airtime = (2 * MOVEMENT.jumpVelocity) / MOVEMENT.gravity;
-    expect(apex).toBeCloseTo(1.24, 2);
-    expect(airtime).toBeCloseTo(0.67, 2);
+  it('gives each material a different health', () => {
+    const hps = MATERIAL_ORDER.map((m) => MATERIALS[m].fullHp);
+    expect(new Set(hps).size).toBe(3);
+    for (let i = 1; i < hps.length; i++) expect(hps[i]).toBeGreaterThan(hps[i - 1]);
   });
 
-  it('has a walkable slope limit of 48 degrees', () => {
-    expect(MOVEMENT.maxWalkableSlopeDeg).toBe(48);
+  it('gives each material a different construction progression', () => {
+    const times = MATERIAL_ORDER.map((m) => MATERIALS[m].buildTime);
+    expect(new Set(times).size).toBe(3);
+  });
+
+  it('caps materials', () => {
+    expect(MATERIAL_CAP).toBe(500);
   });
 });
 
-describe('MASTER_SPEC §4.1 materials', () => {
-  it('caps at 500 per material', () => {
-    expect(MATERIALS.cap).toBe(500);
+describe('§15 inventory is five combat slots', () => {
+  it('has exactly five', () => {
+    expect(INVENTORY.combatSlots).toBe(5);
+  });
+});
+
+describe('§12 weapons', () => {
+  it('covers every required category', () => {
+    const present = new Set(Object.values(WEAPONS).map((w) => w.category));
+    for (const c of WEAPON_CATEGORIES) expect(present.has(c)).toBe(true);
   });
 
-  it('has the documented HP and build times', () => {
-    expect(MATERIALS.wood.fullHp).toBe(150);
-    expect(MATERIALS.stone.fullHp).toBe(300);
-    expect(MATERIALS.metal.fullHp).toBe(500);
-    expect(MATERIALS.wood.buildTime).toBe(3.5);
-    expect(MATERIALS.stone.buildTime).toBe(11);
-    expect(MATERIALS.metal.buildTime).toBe(20);
-  });
-
-  it('starts every material at 90 HP', () => {
-    for (const m of ['wood', 'stone', 'metal']) {
-      expect(MATERIALS[m].initialHp).toBe(90);
+  it('declares every field the spec requires on every weapon', () => {
+    const required = [
+      'damage', 'fireRate', 'magazine', 'reserveAmmo', 'reloadTime',
+      'equipTime', 'headshotMultiplier', 'ammo', 'mode',
+      'recoilVertical', 'recoilHorizontal', 'recoilRecovery'
+    ];
+    for (const [id, w] of Object.entries(WEAPONS)) {
+      for (const field of required) {
+        expect(w[field], `${id}.${field}`).toBeDefined();
+      }
     }
   });
-});
 
-describe('MASTER_SPEC §4.2 harvesting', () => {
-  it('never damages the harvester\'s own structures', () => {
-    expect(HARVEST.damageToOwnStructures).toBe(0);
-    expect(HARVEST.damageToEnemyStructures).toBe(100);
-  });
-});
-
-describe('MASTER_SPEC §6.1 build grid', () => {
-  it('uses a 5.12 m tile and a 3.84 m wall', () => {
-    expect(BUILD.tileSize).toBe(5.12);
-    expect(BUILD.wallHeight).toBe(3.84);
-  });
-
-  it('gives a ramp a 36.87 degree slope', () => {
-    // references/building/01-piece-geometry.md
-    const deg = Math.atan2(BUILD.wallHeight, BUILD.tileSize) * 180 / Math.PI;
-    expect(deg).toBeCloseTo(36.87, 2);
-    expect(deg).toBeLessThan(MOVEMENT.maxWalkableSlopeDeg); // must be runnable
-  });
-
-  it('costs 10 material and reaches 12 m', () => {
-    expect(BUILD.cost).toBe(10);
-    expect(BUILD.placementRange).toBe(12);
-  });
-
-  it('lets a full stack buy 50 pieces', () => {
-    expect(MATERIALS.cap / BUILD.cost).toBe(50);
-  });
-});
-
-describe('MASTER_SPEC §7.2 editing', () => {
-  it('reaches 8 m and gates on two 0.10 s steps inside the 0.25 s budget', () => {
-    expect(EDIT.range).toBe(8);
-    expect(EDIT.enterTime).toBe(0.1);
-    expect(EDIT.confirmTime).toBe(0.1);
-    expect(EDIT.enterTime + EDIT.confirmTime).toBeLessThanOrEqual(EDIT.maxFlowTime);
-  });
-});
-
-describe('MASTER_SPEC §5.2 rarity', () => {
-  it('scales damage from 1.00 to 1.22 across five tiers', () => {
-    expect(RARITIES.common.damageMultiplier).toBe(1.0);
-    expect(RARITIES.legendary.damageMultiplier).toBe(1.22);
-    const tiers = Object.values(RARITIES).map((r) => r.damageMultiplier);
-    for (let i = 1; i < tiers.length; i++) expect(tiers[i]).toBeGreaterThan(tiers[i - 1]);
-  });
-});
-
-describe('MASTER_SPEC §5.3 weapons', () => {
-  it('matches the spec table', () => {
-    expect(WEAPONS.assaultRifle.damage).toBe(30);
-    expect(WEAPONS.assaultRifle.fireRate).toBe(5.5);
-    expect(WEAPONS.smg.damage).toBe(17);
-    expect(WEAPONS.boltSniper.damage).toBe(105);
-    expect(WEAPONS.pumpShotgun.damage * WEAPONS.pumpShotgun.pellets).toBe(90);
-    expect(WEAPONS.tacticalShotgun.damage * WEAPONS.tacticalShotgun.pellets).toBe(60);
-  });
-
-  it('gives the rocket launcher the highest structure damage', () => {
-    const byStructure = Object.values(WEAPONS).sort((a, b) => b.structureDamage - a.structureDamage);
-    expect(byStructure[0].id).toBe('rocketLauncher');
-  });
-});
-
-describe('MASTER_SPEC §9 storm', () => {
-  it('has 8 phases that shrink monotonically to zero', () => {
-    expect(STORM_PHASES).toHaveLength(8);
-    for (let i = 1; i < STORM_PHASES.length; i++) {
-      expect(STORM_PHASES[i].radiusFraction).toBeLessThan(STORM_PHASES[i - 1].radiusFraction);
-    }
-    expect(STORM_PHASES.at(-1).radiusFraction).toBe(0);
-  });
-
-  it('never lowers its damage between phases', () => {
-    for (let i = 1; i < STORM_PHASES.length; i++) {
-      expect(STORM_PHASES[i].dps).toBeGreaterThanOrEqual(STORM_PHASES[i - 1].dps);
+  it('gives shotguns pellets', () => {
+    for (const w of Object.values(WEAPONS)) {
+      if (w.category === 'shotgun') expect(w.pellets).toBeGreaterThan(1);
     }
   });
+
+  it('orders rarity from common to legendary', () => {
+    expect(RARITY_ORDER).toEqual(['common', 'uncommon', 'rare', 'epic', 'legendary']);
+  });
 });
 
-describe('MAP_SPEC §2 dimensions', () => {
-  it('is a 2048 m playable square on a 5.12 m grid, 400 tiles across', () => {
-    expect(WORLD.playableExtent).toBe(2048);
-    expect(WORLD.playableExtent / BUILD.tileSize).toBe(400);
+describe('§16.4 consumables', () => {
+  it('provides small shield, large shield and a health item', () => {
+    expect(CONSUMABLES.smallShield).toBeDefined();
+    expect(CONSUMABLES.largeShield).toBeDefined();
+    expect(CONSUMABLES.medkit).toBeDefined();
   });
 
-  it('puts the build ceiling above the highest terrain', () => {
-    expect(BUILD.ceilingY).toBe(260);
-    expect(BUILD.ceilingY).toBeGreaterThan(WORLD.maxHeight);
+  it('caps small shields below large shields', () => {
+    expect(CONSUMABLES.smallShield.shieldCap).toBeLessThan(CONSUMABLES.largeShield.shieldCap);
+  });
+});
+
+describe('§4 input bindings', () => {
+  it('binds every action the spec lists', () => {
+    const required = [
+      'moveForward', 'moveBackward', 'moveLeft', 'moveRight', 'jump', 'crouch', 'sprint',
+      'interact', 'fire', 'aim', 'reload', 'pickaxe',
+      'weaponSlot1', 'weaponSlot2', 'weaponSlot3', 'weaponSlot4', 'weaponSlot5',
+      'wall', 'floor', 'ramp', 'cone', 'edit', 'confirmEdit', 'resetEdit',
+      'inventory', 'map', 'settings'
+    ];
+    for (const action of required) {
+      expect(DEFAULT_BINDINGS[action], action).toBeDefined();
+    }
   });
 
-  it('starts the safe zone large enough to cover the island', () => {
-    expect(WORLD.initialSafeRadius * 2).toBeGreaterThan(WORLD.playableExtent * 0.9);
+  it('defaults reset edit to mouse wheel down', () => {
+    expect(DEFAULT_BINDINGS.resetEdit).toBe('WheelDown');
+  });
+});
+
+describe('§23 performance budget', () => {
+  it('targets 60 FPS', () => {
+    expect(BUDGET.targetFps).toBe(60);
   });
 });

@@ -3,7 +3,7 @@
  */
 import { VITALS, CONSUMABLES } from '../core/Config.js';
 import { Events } from '../core/EventBus.js';
-import { applyDamageToVitals, fallDamage } from './DamageModel.js';
+import { applyDamageToVitals } from './DamageModel.js';
 import { clamp } from '../core/MathUtils.js';
 
 export class Health {
@@ -48,24 +48,9 @@ export class Health {
     return result;
   }
 
-  /** Fall damage bypasses shield entirely (§3.1). */
-  takeFallDamage(fallDistance) {
-    const dmg = fallDamage(fallDistance);
-    if (dmg <= 0) return 0;
-    this.health = Math.max(0, this.health - dmg);
-    this.bus?.emit(Events.PLAYER_DAMAGED, {
-      ownerId: this.ownerId, amount: dmg, healthLost: dmg, shieldAbsorbed: 0, cause: 'fall'
-    });
-    if (this.health <= 0) {
-      this.alive = false;
-      this.bus?.emit(Events.PLAYER_DIED, { ownerId: this.ownerId, cause: 'fall' });
-    }
-    return dmg;
-  }
-
-  /** Storm damage ignores shield (§9). */
-  takeStormDamage(amount) {
-    return this._directHealth(amount, 'storm');
+  /** Damage that bypasses shield entirely (storm, environment). */
+  takeDirectHealthDamage(amount, cause = 'environment') {
+    return this._directHealth(amount, cause);
   }
 
   _directHealth(amount, cause) {

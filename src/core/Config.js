@@ -1,114 +1,326 @@
 /**
- * Config.js — every gameplay tunable in the project.
+ * Config.js — the ONLY place spatial and gameplay constants are declared.
  *
- * RULE (see CLAUDE.md): no gameplay number appears anywhere else in src/. Each group
- * below names the spec section it comes from. If you change a number here, change the
- * spec first; tests in tests/ assert these against the spec's quoted values.
+ * MASTER_SPEC §2 (no magic numbers), §9.1.1 (the build module is the unit of scale).
+ *
+ * RULE: no file outside this one may contain a spatial literal. Every dimension in the
+ * game derives from TILE and WALL_H by ratio, so retuning the build module rescales the
+ * game coherently instead of requiring an architectural rewrite.
  */
 
-/* ── Simulation — MASTER_SPEC §2.1 ─────────────────────────────────────────── */
+/* ══ THE BUILD MODULE — owner-approved 2026-09-13, MASTER_SPEC §9.1 ══════════ */
+
+/** Build grid tile footprint, metres. Everything horizontal derives from this. */
+export const TILE = 5.12;
+
+/** Wall / storey height, metres. Everything vertical derives from this. */
+export const WALL_H = 3.84;
+
+/**
+ * Ratios against the build module (§9.1.1). Named so the derivation is legible at the
+ * call site and survives a retune of TILE / WALL_H.
+ */
+export const RATIO = Object.freeze({
+  pieceThickness: 0.0390625,   // TILE  -> 0.20 m
+  capsuleRadius: 0.078125,     // TILE  -> 0.40 m
+  standHeight: 0.5,            // WALL_H -> 1.92 m
+  crouchHeight: 0.3125,        // WALL_H -> 1.20 m — just under one wall edit row (1.28 m)
+  stepHeight: 0.1171875,       // WALL_H -> 0.45 m
+  eyeOffset: 0.45,             // WALL_H -> 1.73 m above capsule base when standing
+  roadWidth: 1.5,              // TILE  -> 7.68 m  (MAP_SPEC §12.1)
+  bridgeWidth: 1.0             // TILE  -> 5.12 m
+});
+
+/* ══ SIMULATION — owner-approved 60 Hz, MASTER_SPEC §3 ═══════════════════════ */
+
 export const SIM = Object.freeze({
-  tickRate: 30,
-  fixedDt: 1 / 30,
+  tickRate: 60,
+  fixedDt: 1 / 60,
   maxStepsPerFrame: 5
 });
 
-/* ── Player vitals — MASTER_SPEC §3.1 ──────────────────────────────────────── */
-export const VITALS = Object.freeze({
-  maxHealth: 100,
-  maxShield: 100,
-  startHealth: 100,
-  startShield: 0,
-  fallDamageFreeDistance: 3.5, // metres
-  fallDamagePerMetre: 10,
-  fallDamageCap: 100
+/* ══ EDIT GRIDS — per piece type, MASTER_SPEC §10.2 ══════════════════════════
+ * NOT uniform. Wall 3x3, floor 2x2, cone 2x2, ramp 3 rows x 2 columns.
+ */
+export const EDIT_GRIDS = Object.freeze({
+  wall: { cols: 3, rows: 3, tiles: 9 },
+  floor: { cols: 2, rows: 2, tiles: 4 },
+  cone: { cols: 2, rows: 2, tiles: 4 },
+  ramp: { cols: 2, rows: 3, tiles: 6 }
 });
 
-/* ── Movement — MASTER_SPEC §3.2 ───────────────────────────────────────────── */
+/** Derived edit-tile dimensions in metres (§9.1.1). */
+export const EDIT_TILE = Object.freeze({
+  wall: { width: TILE / EDIT_GRIDS.wall.cols, height: WALL_H / EDIT_GRIDS.wall.rows },
+  floor: { width: TILE / EDIT_GRIDS.floor.cols, depth: TILE / EDIT_GRIDS.floor.rows },
+  cone: { width: TILE / EDIT_GRIDS.cone.cols, depth: TILE / EDIT_GRIDS.cone.rows },
+  ramp: { width: TILE / EDIT_GRIDS.ramp.cols, rise: WALL_H / EDIT_GRIDS.ramp.rows }
+});
+
+/* ══ PLAYER — MASTER_SPEC §5, all spatial values derived ═════════════════════ */
+
+export const VITALS = Object.freeze({
+  maxHealth: 100,   // [OWNER] §13
+  maxShield: 100,   // [OWNER] §13
+  startHealth: 100,
+  startShield: 0
+});
+
 export const MOVEMENT = Object.freeze({
   walkSpeed: 4.6,
   sprintSpeed: 7.6,
   crouchSpeed: 2.4,
-  swimSpeed: 3.4, // MAP_SPEC §4.3
-  groundAccel: 60,
-  groundFriction: 10,
-  airAccel: 12,
-  airControlCap: 1.6,
+  swimSpeed: 3.4,
+  // §5.2 "reaches intended speed quickly" — raised from the baseline's 60 / 12.
+  groundAccel: 85,
+  groundFriction: 12,
+  airAccel: 14,
+  airControlCap: 2.0,
   airDrag: 0.4,
   gravity: 22,
   jumpVelocity: 7.4,
   terminalVelocity: 60,
-  stepHeight: 0.45,
-  maxWalkableSlopeDeg: 48,
-  slideSpeed: 6, // MAP_SPEC §4.2
-  capsuleRadius: 0.4,
-  standHeight: 1.85,
-  crouchHeight: 1.25,
+  maxWalkableSlopeDeg: 50,
+  slideSpeed: 6,
   coyoteTime: 0.10,
   jumpBufferTime: 0.12,
-  sprintDecayTime: 0.25,
-  mantleMinHeight: 0.45,
-  mantleMaxHeight: 1.7,
-  mantleClearance: 0.6,
-  mantleDuration: 0.35
+  crouchTransition: 0.12,
+
+  // Derived from the build module — §9.1.1
+  capsuleRadius: TILE * RATIO.capsuleRadius,   // 0.400 m
+  standHeight: WALL_H * RATIO.standHeight,     // 1.920 m
+  crouchHeight: WALL_H * RATIO.crouchHeight,   // 1.200 m
+  stepHeight: WALL_H * RATIO.stepHeight,       // 0.450 m
+  eyeOffset: WALL_H * RATIO.eyeOffset          // 1.728 m
 });
 
-/* ── Camera — MASTER_SPEC §3.3 ─────────────────────────────────────────────── */
-export const CAMERA = Object.freeze({
-  distance: 3.2,
-  buildDistance: 3.6,
-  shoulderOffsetX: 0.55,
-  shoulderOffsetY: 1.55,
-  fovHip: 80,
-  fovAds: 55,
-  pitchMinDeg: -85,
-  pitchMaxDeg: 85,
-  lookSensitivity: 0.0022, // rad per mouse count at user sensitivity 1.0
-  adsSensitivityScale: 0.6,
-  collisionRadius: 0.25,
-  collisionPadding: 0.1,
-  transitionTime: 0.12
+/** Mantling — §5.5. Suppressed during building so it can never fire by accident. */
+export const MANTLE = Object.freeze({
+  minHeight: WALL_H * RATIO.stepHeight,        // must exceed a step
+  maxHeight: WALL_H * 0.4427,                  // 1.70 m
+  clearance: TILE * 0.1171875,                 // 0.60 m behind the ledge
+  forwardReach: TILE * 0.17578125,             // 0.90 m
+  duration: 0.35,
+  // [OWNER] §5.5 "No accidental mantling during normal building."
+  suppressAfterBuildTime: 0.20
 });
 
-/* ── Materials — MASTER_SPEC §4.1 ──────────────────────────────────────────── */
-export const MATERIALS = Object.freeze({
-  cap: 500,
-  wood: { id: 'wood', initialHp: 90, fullHp: 150, buildTime: 3.5, color: 0xc9873b },
-  stone: { id: 'stone', initialHp: 90, fullHp: 300, buildTime: 11.0, color: 0x9aa0a6 },
-  metal: { id: 'metal', initialHp: 90, fullHp: 500, buildTime: 20.0, color: 0x7fb4d9 }
-});
+/* ══ CHARACTER RIG — SKIN_SPEC §3, §5 ════════════════════════════════════════
+ * Visual proportions for the player character. Purely cosmetic: collision stays the
+ * capsule in MOVEMENT for every skin (SKIN_SPEC §3.4, ITEM_SHOP_SPEC §4.4).
+ *
+ * Everything is a ratio of the capsule, so a retune of TILE / WALL_H rescales every
+ * character with the world instead of leaving skins the wrong size. Only the anchors that
+ * cannot be derived live here — the rig computes torso height, arm and leg spans from
+ * them, which is what keeps every build exactly standHeight tall (§3.2).
+ */
 
-export const MATERIAL_ORDER = Object.freeze(['wood', 'stone', 'metal']);
+export const CHARACTER = Object.freeze({
+  /** Reference dimensions the whole rig is expressed against. */
+  height: MOVEMENT.standHeight,
+  radius: MOVEMENT.capsuleRadius,
 
-/* ── Harvesting — MASTER_SPEC §4.2 ─────────────────────────────────────────── */
-export const HARVEST = Object.freeze({
-  swingInterval: 0.55,
-  damageToHarvestables: 75,
-  damageToPlayers: 20,
-  damageToEnemyStructures: 100,
-  damageToOwnStructures: 0,
-  weakPointMultiplier: 2,
-  range: 3.0,
-  sources: Object.freeze({
-    tree: { material: 'wood', perSwing: 12, total: 50 },
-    pallet: { material: 'wood', perSwing: 10, total: 30 },
-    boulder: { material: 'stone', perSwing: 14, total: 60 },
-    brickWall: { material: 'stone', perSwing: 11, total: 40 },
-    vehicle: { material: 'metal', perSwing: 12, total: 70 },
-    container: { material: 'metal', perSwing: 14, total: 90 },
-    streetlight: { material: 'metal', perSwing: 10, total: 30 }
+  /** Hip line: the top of the legs and the bottom of the torso. */
+  hipY: MOVEMENT.standHeight * 0.46,
+  footHeight: MOVEMENT.standHeight * 0.05,
+
+  /** Base part sizes for the `athletic` build; builds scale these (§5). */
+  torsoWidth: MOVEMENT.capsuleRadius * 2.05,
+  torsoDepth: MOVEMENT.capsuleRadius * 1.25,
+  hipWidth: MOVEMENT.capsuleRadius * 1.70,
+  headRadius: MOVEMENT.capsuleRadius * 0.58,
+  neckLength: MOVEMENT.capsuleRadius * 0.36,
+  neckWidth: MOVEMENT.capsuleRadius * 0.62,
+  armWidth: MOVEMENT.capsuleRadius * 0.52,
+  armDepth: MOVEMENT.capsuleRadius * 0.60,
+  armLength: MOVEMENT.standHeight * 0.36,
+  legWidth: MOVEMENT.capsuleRadius * 0.74,
+  legDepth: MOVEMENT.capsuleRadius * 0.88,
+
+  /**
+   * Build multipliers (§5). Applied before features, so two builds read as different
+   * shapes rather than as different palettes.
+   *
+   * `legScale` moves the hip line, which is what makes a mascot stubby and a lean frame
+   * long-legged without either one changing the character's overall height.
+   */
+  builds: Object.freeze({
+    lean: { shoulder: 0.88, torso: 0.86, limb: 0.88, head: 1.00, legScale: 1.06, stance: 0.92 },
+    athletic: { shoulder: 1.00, torso: 1.00, limb: 1.00, head: 1.00, legScale: 1.00, stance: 1.00 },
+    heavy: { shoulder: 1.14, torso: 1.12, limb: 1.12, head: 0.94, legScale: 0.96, stance: 1.10 },
+    stout: { shoulder: 1.04, torso: 1.12, limb: 0.96, head: 1.62, legScale: 0.78, stance: 1.06 }
   })
 });
 
-/* ── Combat — MASTER_SPEC §5 ───────────────────────────────────────────────── */
-export const HIT_MULTIPLIERS = Object.freeze({
-  head: 2.0,
-  headShotgun: 1.5,
-  torso: 1.0,
-  legs: 1.0
+/* ══ HARVESTING TOOL VIEW — SKIN_SPEC §11.1 ══════════════════════════════════
+ * How big a harvesting tool LOOKS. Purely cosmetic and derived from the character, so a
+ * retune of the build module rescales tools with their wielder.
+ *
+ * Damage, reach and swing rate are PICKAXE, below, and are identical for every equipped
+ * tool (ITEM_SHOP_SPEC §4.4). Nothing in this block reaches gameplay.
+ */
+
+export const PICKAXE_VIEW = Object.freeze({
+  length: CHARACTER.height * 0.42,
+  haftRadius: CHARACTER.radius * 0.1,
+  // The head carries the item's identity in a shop card, so it is generously sized
+  // against the haft. A correctly-proportioned real tool reads as a hammer on a stick.
+  headWidth: CHARACTER.radius * 1.5,
+  headHeight: CHARACTER.radius * 0.95,
+  headDepth: CHARACTER.radius * 0.55,
+  /** Where the hand sits relative to the character rig when carrying. */
+  gripDrop: CHARACTER.height * 0.03,
+  gripOut: CHARACTER.radius * 0.3,
+
+  /**
+   * CARRY POSE (SKIN_SPEC §11.6) — a tool held in the hand at the side, angled down and
+   * a little forward. It is NOT slung across the back: the previous pose tipped the head
+   * up and behind the shoulder, which read as a back-mounted accessory rather than as a
+   * held tool, and put the head across the character's own silhouette.
+   *
+   * Expressed as a DIRECTION rather than as Euler angles, because the direction is what
+   * the pose actually means — the head points down-and-out — and the view solves the
+   * rotation from it. Angles are radians.
+   */
+  carryDrop: 0.90,      // below horizontal: ~52°, so the head hangs beside the thigh
+  carrySwing: 0.52,     // outward from straight ahead: ~30°, so the haft BUTT clears the hip
+
+  /**
+   * How far up the haft the hand closes when carrying. A pickaxe carried at the side is
+   * gripped near its balance point, not at the butt — and the geometry needs it: the tool
+   * is longer than a character's hand is high, so gripping the butt would drag the head
+   * through the floor at any real downward angle.
+   */
+  carryGrip: CHARACTER.height * 0.06,
+
+  /** Air the head keeps under it, so a carried tool never scrapes the ground. */
+  carryClearance: CHARACTER.radius * 0.15
 });
 
-/** Rarity damage multipliers and HUD colours — §5.2 */
+/* ══ WEAPON VIEW — MASTER_SPEC §12.1.1, §12.1.2 ══════════════════════════════
+ * How big a weapon LOOKS and where it sits in the hand. Every length is a ratio of the
+ * player capsule, so a retune of the build module rescales weapons with their wielder.
+ *
+ * Nothing in this block reaches gameplay: damage, spread, recoil and ADS timing are
+ * WEAPONS and SPREAD, above.
+ */
+
+export const WEAPON_VIEW = Object.freeze({
+  /** Reference length — an assault rifle. Every category scales against it (§12.1.1). */
+  length: CHARACTER.height * 0.40,
+  /** Receiver cross-section: the body the barrel, stock and magazine hang off. */
+  bodyHeight: CHARACTER.radius * 0.36,
+  bodyWidth: CHARACTER.radius * 0.17,
+  barrelRadius: CHARACTER.radius * 0.055,
+
+  /** Where the primary hand closes, as a fraction of length back from the muzzle. */
+  gripAlong: 0.62,
+
+  /**
+   * How far the shoulder swings the arm forward, radians (§12.1.2).
+   *
+   * This is what actually MOVES the weapon: the grip is derived from where the arm puts
+   * the hand, so the hand always holds the weapon rather than hovering near it. The rig's
+   * arm is one rigid segment with no elbow, so a fully-raised arm reaches shoulder height
+   * and no higher — the ADS value takes it as far as the rig honestly goes, and the wrist
+   * offsets below carry it the rest of the way to the aim line.
+   */
+  hipArmPitch: 0.62,
+  adsArmPitch: 1.42,
+
+  /**
+   * Wrist offsets from the hand to the grip, hip and ADS. Small by construction: anything
+   * large here would be the weapon floating out of the hand rather than being held in it.
+   */
+  hipOut: CHARACTER.radius * -0.06,     // a touch inboard of the shoulder line
+  adsOut: CHARACTER.radius * -0.85,     // drawn in toward the aim line
+  hipLift: 0,
+  adsLift: CHARACTER.height * 0.055,
+  hipForward: CHARACTER.radius * 0.10,
+  adsForward: CHARACTER.radius * 0.16,
+
+  /** Muzzle attitude in rig space. Down and toed in at the hip; level when aimed. */
+  hipPitch: 0.24,
+  adsPitch: -0.04,
+  hipYaw: 0.16,
+  adsYaw: 0.03
+});
+
+/* ══ CAMERA — MASTER_SPEC §7 ═════════════════════════════════════════════════ */
+
+export const CAMERA = Object.freeze({
+  // Close over-the-shoulder, but far enough that the avatar does not occlude the
+  // crosshair. Tuned against the rendered view; see MASTER_SPEC §7.
+  distance: 4.0,
+  shoulderOffsetX: 0.8,
+  heightAbovebase: WALL_H * RATIO.standHeight * 0.807,  // 1.55 m
+  crouchDrop: 0.6,
+  pitchMinDeg: -85,
+  pitchMaxDeg: 85,
+  fovDefault: 80,
+  lookSensitivity: 0.0022,
+  adsSensitivityScale: 0.6,
+  scopeSensitivityScale: 0.45,
+  // §7.1 — pulling in is immediate (clipping is never acceptable); restoring is smoothed.
+  collisionRadius: 0.25,
+  collisionPadding: 0.10,
+  restoreSpeed: 8.0,
+  transitionTime: 0.12
+});
+
+/* ══ BUILDING — MASTER_SPEC §9 ═══════════════════════════════════════════════ */
+
+export const BUILD = Object.freeze({
+  tileSize: TILE,
+  wallHeight: WALL_H,
+  thickness: TILE * RATIO.pieceThickness,
+  cost: 10,
+  placementRange: TILE * 2.34375,       // 12.0 m
+  editRange: TILE * 1.5625,             // 8.0 m
+  // §9.3 — inputs are QUEUED, never dropped.
+  placementCooldown: 0.05,
+  queueDepth: 3,
+  queuedIntentLifetime: 0.25,
+  supportGraceTime: 0.35,
+  ceilingY: 260
+});
+
+export const PIECE_TYPES = Object.freeze(['wall', 'floor', 'ramp', 'cone']);
+export const DIRECTIONS = Object.freeze(['north', 'east', 'south', 'west']);
+
+/* ══ MATERIALS — WOOD / BRICK / METAL, MASTER_SPEC §9.4 ══════════════════════ */
+
+export const MATERIALS = Object.freeze({
+  wood: { id: 'wood', name: 'Wood', initialHp: 90, fullHp: 150, buildTime: 3.5, color: 0xc9873b },
+  brick: { id: 'brick', name: 'Brick', initialHp: 90, fullHp: 300, buildTime: 11.0, color: 0xb06a4f },
+  metal: { id: 'metal', name: 'Metal', initialHp: 90, fullHp: 500, buildTime: 20.0, color: 0x8fa3b0 }
+});
+
+export const MATERIAL_ORDER = Object.freeze(['wood', 'brick', 'metal']);
+
+/* ══ HUD VITALS — MASTER_SPEC §18.2 ══════════════════════════════════════════
+ * Health reads GREEN and shield reads BLUE, which is how the genre reads them. Each bar
+ * is a two-stop vertical gradient: a lit top and a darker base, so a bar has form rather
+ * than being a flat rectangle.
+ */
+export const VITAL_COLORS = Object.freeze({
+  health: Object.freeze({ top: '#3ad64a', bottom: '#1f9c2c' }),
+  shield: Object.freeze({ top: '#4aa8ff', bottom: '#1f6fd6' })
+});
+export const MATERIAL_CAP = 500;
+
+/* ══ EDITING — MASTER_SPEC §10 ═══════════════════════════════════════════════ */
+
+export const EDIT = Object.freeze({
+  range: BUILD.editRange,
+  enterTime: 0.05,
+  confirmTime: 0.05,
+  maxFlowTime: 0.25,
+  confirmOnRelease: true   // [OWNER] §4.2 — user-settable ON/OFF
+});
+
+/* ══ COMBAT — MASTER_SPEC §12, §13 ═══════════════════════════════════════════ */
+
 export const RARITIES = Object.freeze({
   common: { id: 'common', tier: 0, damageMultiplier: 1.00, color: 0xb0b0b0 },
   uncommon: { id: 'uncommon', tier: 1, damageMultiplier: 1.05, color: 0x4cd94c },
@@ -119,66 +331,75 @@ export const RARITIES = Object.freeze({
 
 export const RARITY_ORDER = Object.freeze(['common', 'uncommon', 'rare', 'epic', 'legendary']);
 
-/** Damage falloff stops, hitscan classes — §5.5. [distance m, multiplier] */
-export const FALLOFF_CURVE = Object.freeze([
-  [0, 1.0], [35, 1.0], [60, 0.80], [90, 0.65]
+export const WEAPON_CATEGORIES = Object.freeze([
+  'assaultRifle', 'shotgun', 'smg', 'pistol', 'sniper', 'utility'
 ]);
 
-/** Weapon definitions at Common rarity — §5.3, §5.4, §5.5, §5.6 */
+export const FALLOFF_CURVE = Object.freeze([[0, 1.0], [35, 1.0], [60, 0.80], [90, 0.65]]);
+
+/** §12.1 — every weapon declares equipTime, reserveAmmo and recoil. */
 export const WEAPONS = Object.freeze({
   assaultRifle: {
-    id: 'assaultRifle', name: 'Assault Rifle', ammo: 'medium',
-    damage: 30, fireRate: 5.5, magazine: 30, reloadTime: 2.3,
-    structureDamage: 30, mode: 'hitscan', useFalloff: true,
-    hipSpread: 3.2, adsSpread: 0.6, adsFov: 55, adsTime: 0.24,
-    bloomPerShot: 0.45
+    id: 'assaultRifle', name: 'Assault Rifle', category: 'assaultRifle', ammo: 'medium',
+    damage: 30, fireRate: 5.5, magazine: 30, reserveAmmo: 210, reloadTime: 2.3,
+    equipTime: 0.55, headshotMultiplier: 2.0, structureDamage: 30,
+    mode: 'hitscan', useFalloff: true,
+    hipSpread: 3.2, adsSpread: 0.6, adsFov: 55, adsTime: 0.24, bloomPerShot: 0.45,
+    recoilVertical: 0.55, recoilHorizontal: 0.18, recoilRecovery: 6.0
   },
   smg: {
-    id: 'smg', name: 'SMG', ammo: 'light',
-    damage: 17, fireRate: 11.0, magazine: 30, reloadTime: 2.1,
-    structureDamage: 17, mode: 'hitscan', useFalloff: true,
-    hipSpread: 4.4, adsSpread: 1.4, adsFov: 62, adsTime: 0.18,
-    bloomPerShot: 0.30
+    id: 'smg', name: 'SMG', category: 'smg', ammo: 'light',
+    damage: 17, fireRate: 11.0, magazine: 30, reserveAmmo: 240, reloadTime: 2.1,
+    equipTime: 0.45, headshotMultiplier: 2.0, structureDamage: 17,
+    mode: 'hitscan', useFalloff: true,
+    hipSpread: 4.4, adsSpread: 1.4, adsFov: 62, adsTime: 0.18, bloomPerShot: 0.30,
+    recoilVertical: 0.28, recoilHorizontal: 0.22, recoilRecovery: 8.0
   },
   pumpShotgun: {
-    id: 'pumpShotgun', name: 'Pump Shotgun', ammo: 'shells',
-    damage: 9, pellets: 10, fireRate: 0.75, magazine: 5, reloadTime: 4.5,
-    structureDamage: 100, mode: 'pellets', useFalloff: false,
+    id: 'pumpShotgun', name: 'Pump Shotgun', category: 'shotgun', ammo: 'shells',
+    damage: 9, pellets: 10, fireRate: 0.75, magazine: 5, reserveAmmo: 60, reloadTime: 4.5,
+    equipTime: 0.85, headshotMultiplier: 1.5, structureDamage: 100,
+    mode: 'pellets', useFalloff: false,
     coneHalfAngle: 4.5, adsConeScale: 0.7, adsFov: 65, adsTime: 0.28,
-    pelletFalloff: [[0, 1.0], [8, 1.0], [22, 0.55], [1000, 0.35]]
+    pelletFalloff: [[0, 1.0], [8, 1.0], [22, 0.55], [1000, 0.35]],
+    recoilVertical: 2.2, recoilHorizontal: 0.4, recoilRecovery: 5.0
   },
   tacticalShotgun: {
-    id: 'tacticalShotgun', name: 'Tactical Shotgun', ammo: 'shells',
-    damage: 6, pellets: 10, fireRate: 1.6, magazine: 8, reloadTime: 3.6,
-    structureDamage: 80, mode: 'pellets', useFalloff: false,
+    id: 'tacticalShotgun', name: 'Tactical Shotgun', category: 'shotgun', ammo: 'shells',
+    damage: 6, pellets: 10, fireRate: 1.6, magazine: 8, reserveAmmo: 60, reloadTime: 3.6,
+    equipTime: 0.70, headshotMultiplier: 1.5, structureDamage: 80,
+    mode: 'pellets', useFalloff: false,
     coneHalfAngle: 6.0, adsConeScale: 0.7, adsFov: 65, adsTime: 0.28,
-    pelletFalloff: [[0, 1.0], [6, 1.0], [18, 0.5], [1000, 0.3]]
+    pelletFalloff: [[0, 1.0], [6, 1.0], [18, 0.5], [1000, 0.3]],
+    recoilVertical: 1.4, recoilHorizontal: 0.35, recoilRecovery: 6.0
   },
   boltSniper: {
-    id: 'boltSniper', name: 'Bolt Sniper', ammo: 'heavy',
-    damage: 105, fireRate: 0.55, magazine: 1, reloadTime: 2.8,
-    structureDamage: 125, mode: 'hitscan', useFalloff: false,
-    hipSpread: 12.0, adsSpread: 0.0, adsFov: 28, adsTime: 0.40,
-    bloomPerShot: 0
+    id: 'boltSniper', name: 'Bolt Sniper', category: 'sniper', ammo: 'heavy',
+    damage: 105, fireRate: 0.55, magazine: 1, reserveAmmo: 20, reloadTime: 2.8,
+    equipTime: 1.05, headshotMultiplier: 2.5, structureDamage: 125,
+    mode: 'hitscan', useFalloff: false,
+    hipSpread: 12.0, adsSpread: 0.0, adsFov: 28, adsTime: 0.40, bloomPerShot: 0,
+    recoilVertical: 3.5, recoilHorizontal: 0.2, recoilRecovery: 3.0
   },
   pistol: {
-    id: 'pistol', name: 'Pistol', ammo: 'light',
-    damage: 24, fireRate: 6.75, magazine: 16, reloadTime: 1.5,
-    structureDamage: 24, mode: 'hitscan', useFalloff: true,
-    hipSpread: 2.8, adsSpread: 0.5, adsFov: 58, adsTime: 0.20,
-    bloomPerShot: 0.35
+    id: 'pistol', name: 'Pistol', category: 'pistol', ammo: 'light',
+    damage: 24, fireRate: 6.75, magazine: 16, reserveAmmo: 180, reloadTime: 1.5,
+    equipTime: 0.40, headshotMultiplier: 2.0, structureDamage: 24,
+    mode: 'hitscan', useFalloff: true,
+    hipSpread: 2.8, adsSpread: 0.5, adsFov: 58, adsTime: 0.20, bloomPerShot: 0.35,
+    recoilVertical: 0.45, recoilHorizontal: 0.15, recoilRecovery: 7.0
   },
   rocketLauncher: {
-    id: 'rocketLauncher', name: 'Rocket Launcher', ammo: 'rockets',
-    damage: 100, splashDamage: 75, splashRadius: 4.5,
-    fireRate: 0.6, magazine: 1, reloadTime: 3.2,
-    structureDamage: 400, mode: 'projectile', projectileSpeed: 45, useFalloff: false,
-    hipSpread: 1.5, adsSpread: 0.4, adsFov: 60, adsTime: 0.35,
-    bloomPerShot: 0
+    id: 'rocketLauncher', name: 'Rocket Launcher', category: 'utility', ammo: 'rockets',
+    damage: 100, splashDamage: 75, splashRadius: TILE * 0.879,
+    fireRate: 0.6, magazine: 1, reserveAmmo: 12, reloadTime: 3.2,
+    equipTime: 1.10, headshotMultiplier: 1.0, structureDamage: 400,
+    mode: 'projectile', projectileSpeed: 45, useFalloff: false,
+    hipSpread: 1.5, adsSpread: 0.4, adsFov: 60, adsTime: 0.35, bloomPerShot: 0,
+    recoilVertical: 2.0, recoilHorizontal: 0.3, recoilRecovery: 4.0
   }
 });
 
-/** Spread growth — §5.5 */
 export const SPREAD = Object.freeze({
   bloomCap: 8,
   bloomDecayPerSecond: 9,
@@ -186,142 +407,114 @@ export const SPREAD = Object.freeze({
   movementPenaltyPerWalkSpeed: 0.55,
   airborneMultiplier: 2,
   crouchMultiplier: 0.75,
-  shotgunJitterFraction: 0.15 // §5.6
+  shotgunJitterFraction: 0.15
 });
 
-/* ── Inventory — MASTER_SPEC §5.7 ──────────────────────────────────────────── */
+/* ══ PICKAXE — MASTER_SPEC §14 ═══════════════════════════════════════════════ */
+
+export const PICKAXE = Object.freeze({
+  swingInterval: 0.55,
+  range: TILE * 0.5859375,        // 3.0 m
+  damageToStructures: 100,
+  damageToOwnStructures: 0,
+  damageToPlayers: 20,
+  damageToProps: 75,
+  harvestPerSwing: { wood: 12, brick: 14, metal: 12 },
+  weakPointMultiplier: 2
+});
+
+/* ══ INVENTORY — five combat slots + separate pickaxe, MASTER_SPEC §15 ═══════ */
+
 export const INVENTORY = Object.freeze({
-  slots: 6,
-  toolSlot: 0,
-  switchTime: 0.25,
+  combatSlots: 5,       // [OWNER]
+  switchTime: 0.25,     // floor; per-weapon equipTime overrides upward
   pickupHoldTime: 0.4,
   stackSizes: { light: 999, medium: 999, heavy: 999, shells: 60, rockets: 12 }
 });
 
-/* ── Consumables — MASTER_SPEC §5.8 ────────────────────────────────────────── */
 export const CONSUMABLES = Object.freeze({
-  bandage: { id: 'bandage', useTime: 3.0, health: 15, healthCap: 75, stack: 5 },
-  medkit: { id: 'medkit', useTime: 8.0, health: 100, healthCap: 100, stack: 3 },
-  smallShield: { id: 'smallShield', useTime: 2.0, shield: 25, shieldCap: 50, stack: 6 },
-  shieldPotion: { id: 'shieldPotion', useTime: 5.0, shield: 50, shieldCap: 100, stack: 3 }
+  smallShield: { id: 'smallShield', name: 'Small Shield', useTime: 2.0, shield: 25, shieldCap: 50, stack: 6 },
+  largeShield: { id: 'largeShield', name: 'Large Shield', useTime: 5.0, shield: 50, shieldCap: 100, stack: 3 },
+  medkit: { id: 'medkit', name: 'Medkit', useTime: 8.0, health: 100, healthCap: 100, stack: 3 }
 });
 
-/* ── Building — MASTER_SPEC §6 ─────────────────────────────────────────────── */
-export const BUILD = Object.freeze({
-  tileSize: 5.12,
-  wallHeight: 3.84,
-  thickness: 0.20,
-  cost: 10,
-  placementRange: 12.0,
-  minPlacementInterval: 0.10,
-  turboPlacementInterval: 0.15,
-  supportGraceTime: 0.35,
-  ceilingY: 260 // MAP_SPEC §3.4
+/* ══ INPUT — MASTER_SPEC §4 ══════════════════════════════════════════════════ */
+
+export const DEFAULT_BINDINGS = Object.freeze({
+  moveForward: 'KeyW', moveBackward: 'KeyS', moveLeft: 'KeyA', moveRight: 'KeyD',
+  jump: 'Space', crouch: 'ControlLeft', sprint: 'ShiftLeft',
+  interact: 'KeyE', fire: 'Mouse0', aim: 'Mouse2', reload: 'KeyR',
+  pickaxe: 'Digit1',
+  weaponSlot1: 'Digit1', weaponSlot2: 'Digit2', weaponSlot3: 'Digit3',
+  weaponSlot4: 'Digit4', weaponSlot5: 'Digit5',
+  wall: 'KeyQ', floor: 'KeyF', ramp: 'KeyC', cone: 'KeyV',
+  cycleMaterial: 'KeyX',           // §4.4, §9.4.1 — wood -> brick -> metal
+  edit: 'KeyG', confirmEdit: 'Mouse0',
+  resetEdit: 'WheelDown',          // [OWNER] §10.9
+  inventory: 'Tab', map: 'KeyM', settings: 'Escape',
+
+  // §4.4, §4.5 — developer actions live in the SAME table as everything else, so they are
+  // rebindable, persisted, listed in Settings and conflict-checked like any other bind.
+  // They do nothing unless DEV_MODE is on (ADMIN_PANEL_SPEC §1.2).
+  //
+  // None of them takes Backquote: ``` belongs to the player, who may bind it to the
+  // pickaxe or anything else without a developer tool intercepting it.
+  toggleAdminMenu: 'F8',
+  toggleDevConsole: 'F9',
+  toggleCollisionDebug: 'F10',
+  toggleAiDebug: 'F11',
+  togglePerformancePanel: 'F6'
 });
 
-export const PIECE_TYPES = Object.freeze(['wall', 'floor', 'ramp', 'cone']);
-export const DIRECTIONS = Object.freeze(['north', 'east', 'south', 'west']);
-
-/* ── Editing — MASTER_SPEC §7.2 ────────────────────────────────────────────── */
-export const EDIT = Object.freeze({
-  range: 8.0,
-  enterTime: 0.10,
-  confirmTime: 0.10,
-  maxFlowTime: 0.25 // design ceiling, asserted by tests
-});
-
-/* ── Loot — MASTER_SPEC §8.2 ───────────────────────────────────────────────── */
-export const LOOT_RARITY_WEIGHTS = Object.freeze({
-  floor: { common: 45, uncommon: 32, rare: 16, epic: 5.5, legendary: 1.5 },
-  chest: { common: 18, uncommon: 34, rare: 30, epic: 14, legendary: 4 }
-});
-
-/** Weapon class weights by POI tier — MAP_SPEC §6.3 */
-export const LOOT_CLASS_WEIGHTS = Object.freeze({
-  major:    { assaultRifle: 24, smg: 20, pumpShotgun: 13, tacticalShotgun: 13, pistol: 12, boltSniper: 11, rocketLauncher: 7 },
-  minor:    { assaultRifle: 24, smg: 21, pumpShotgun: 13, tacticalShotgun: 13, pistol: 14, boltSniper: 10, rocketLauncher: 5 },
-  landmark: { assaultRifle: 26, smg: 22, pumpShotgun: 12, tacticalShotgun: 12, pistol: 18, boltSniper: 8, rocketLauncher: 2 },
-  outside:  { assaultRifle: 26, smg: 22, pumpShotgun: 12, tacticalShotgun: 12, pistol: 19, boltSniper: 8, rocketLauncher: 1 }
-});
-
-/** Spawn-point roll chances — MAP_SPEC §6.2 */
-export const LOOT_SPAWN_CHANCE = Object.freeze({
-  chest: 0.60, floor: 0.75, ammoBox: 0.55, outsideProp: 0.35
-});
-
-/* ── Match flow — MASTER_SPEC §9 ───────────────────────────────────────────── */
-export const STORM_PHASES = Object.freeze([
-  { phase: 1, wait: 180, shrink: 120, radiusFraction: 0.60, dps: 1 },
-  { phase: 2, wait: 120, shrink: 100, radiusFraction: 0.45, dps: 1 },
-  { phase: 3, wait: 100, shrink: 90, radiusFraction: 0.33, dps: 2 },
-  { phase: 4, wait: 90, shrink: 80, radiusFraction: 0.24, dps: 3 },
-  { phase: 5, wait: 75, shrink: 70, radiusFraction: 0.17, dps: 5 },
-  { phase: 6, wait: 60, shrink: 60, radiusFraction: 0.11, dps: 7 },
-  { phase: 7, wait: 45, shrink: 45, radiusFraction: 0.06, dps: 10 },
-  { phase: 8, wait: 30, shrink: 60, radiusFraction: 0.00, dps: 10 }
+/** §4.5 — the developer subset of DEFAULT_BINDINGS, inert with DEV_MODE off. */
+export const DEV_ACTIONS = Object.freeze([
+  'toggleAdminMenu', 'toggleDevConsole',
+  'toggleCollisionDebug', 'toggleAiDebug', 'togglePerformancePanel'
 ]);
 
-export const MATCH = Object.freeze({
-  dropDuration: 45,
-  stormTickInterval: 1.0
+/** Binds that may legitimately share a key with another action. */
+export const BIND_CONFLICT_EXEMPT = Object.freeze([
+  ['pickaxe', 'weaponSlot1'],
+  ['fire', 'confirmEdit']
+]);
+
+/* ══ LIGHTING — MAP_SPEC §20.8, §21.9 ════════════════════════════════════════ */
+
+export const LIGHTING = Object.freeze({
+  // §20.8 — a warm low-angle key. This is the only light that casts shadows.
+  sunIntensity: 2.35,
+  sunElevationDeg: 55,
+
+  // §20.8 — cool sky over warm ground, shaded by surface normal.
+  hemisphereIntensity: 0.8,
+
+  // §21.9 — a flat floor under shadowed and interior surfaces, so an enclosed room reads
+  // as a dim room rather than a black void. A fill, not a second key: §21.8.11 holds it
+  // well below the sun so exteriors keep their directional shading and cast shadows.
+  interiorFill: 0.55
 });
 
-/* ── World — MAP_SPEC §2, §3, §7, §8, §9 ───────────────────────────────────── */
+/* ══ WORLD — MAP_SPEC ════════════════════════════════════════════════════════ */
+
 export const WORLD = Object.freeze({
-  name: 'Cinder Isle',
-  playableExtent: 2048,
-  worldExtent: 2560,
-  heightmapResolution: 1025,
+  // MAP_SPEC §21.2 — how far, in build cells, a POI's buildings may be settled from the
+  // POI's own centre to find dry ground. The POI marker never moves; only its blueprint
+  // does. Large enough to step a footprint off a river, small enough that a POI cannot
+  // wander out of the place the map put it.
+  poiSettleReach: 6,
+  regionExtent: 1024,          // MAP_SPEC §12.2 — the first region only
+  eventualIslandExtent: 2048,
   seaLevel: 0,
-  minHeight: -8,
-  maxHeight: 190,
-  killFloorY: -40,
-  oceanDps: 10,
   swimDepth: 1.2,
-  initialSafeRadius: 980,
-  initialCentreJitter: 180,
   chunkSize: 128,
-  chunkLodDistances: [200, 450, 800],
   propLoadRadius: 500,
   propUnloadRadius: 650,
   buildCullDistance: 300,
   terrainDrawDistance: 1400
 });
 
-/** Procedural terrain fallback — MAP_SPEC §4.1 */
-export const TERRAIN_NOISE = Object.freeze({
-  falloffRadius: 1100,
-  base: { octaves: 5, frequency: 1 / 512, lacunarity: 2.0, gain: 0.5, amplitude: 120 },
-  ridge: { octaves: 3, frequency: 1 / 256, lacunarity: 2.0, gain: 0.5, amplitude: 60 },
-  detail: { octaves: 3, frequency: 1 / 64, lacunarity: 2.0, gain: 0.5, amplitude: 4 },
-  poiBlendSkirt: 24
-});
-
-/** Drop path — MAP_SPEC §7 */
-export const DROP = Object.freeze({
-  pathRadius: 1300,
-  altitude: 600,
-  glideSpeed: 26,
-  glideDescent: 22,
-  diveDescent: 55,
-  diveSpeed: 34,
-  autoDeployHeight: 60
-});
-
-/* ── Input defaults — MASTER_SPEC §11.3 ────────────────────────────────────── */
-export const DEFAULT_BINDINGS = Object.freeze({
-  moveForward: 'KeyW', moveBack: 'KeyS', moveLeft: 'KeyA', moveRight: 'KeyD',
-  jump: 'Space', sprint: 'ShiftLeft', crouch: 'ControlLeft',
-  fire: 'Mouse0', ads: 'Mouse2', reload: 'KeyR',
-  slot0: 'Digit1', slot1: 'Digit2', slot2: 'Digit3',
-  slot3: 'Digit4', slot4: 'Digit5', slot5: 'Digit6',
-  buildWall: 'F1', buildFloor: 'F2', buildRamp: 'F3', buildCone: 'F4',
-  toggleBuild: 'KeyQ', cycleMaterial: 'F5',
-  edit: 'KeyG', rotate: 'KeyR', interact: 'KeyE', map: 'KeyM'
-});
-
-/* ── Performance budget — MASTER_SPEC §11.2 ────────────────────────────────── */
 export const BUDGET = Object.freeze({
+  targetFps: 60,
   frameTimeMs: 16.6,
   simulationMs: 4,
   maxDrawCalls: 1200,

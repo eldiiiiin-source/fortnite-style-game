@@ -1,9 +1,12 @@
 /**
- * Weapon.js — a weapon instance: ammo, fire timing, reload, bloom. MASTER_SPEC §5.3-§5.5.
+ * Weapon.js — a weapon instance and the five-slot inventory. MASTER_SPEC §12, §15.
  */
 import { WEAPONS, RARITIES, INVENTORY } from '../core/Config.js';
 import { Events } from '../core/EventBus.js';
-import { computeSpread, decayBloom, computeDamage, computeStructureDamage } from './DamageModel.js';
+import {
+  computeSpread, decayBloom, singleHitDamage, computeStructureDamage,
+  recoilKick, recoilRecover
+} from './DamageModel.js';
 
 export class Weapon {
   constructor(weaponId, rarity = 'common') {
@@ -18,20 +21,34 @@ export class Weapon {
     this.ammoInMag = def.magazine;
     this.reloading = false;
     this.reloadRemaining = 0;
-    this.cooldown = 0;          // seconds until the next shot is allowed
-    this.shotsInBurst = 0;      // bloom accumulator (§5.5)
+    this.cooldown = 0;
+    this.equipRemaining = 0;       // §12 — per-weapon equip time
+    this.shotsInBurst = 0;
     this.timeSinceLastShot = Infinity;
-    this.adsProgress = 0;       // 0 = hip, 1 = fully aimed
+    this.adsProgress = 0;
+    this.recoil = { pitch: 0, yaw: 0 };
   }
 
   get name() { return this.def.name; }
+  get category() { return this.def.category; }
   get ammoType() { return this.def.ammo; }
+  get reserveCap() { return this.def.reserveAmmo; }
   get magazine() { return this.def.magazine; }
   get fireInterval() { return 1 / this.def.fireRate; }
   get isEmpty() { return this.ammoInMag <= 0; }
-  get canFire() { return !this.reloading && this.cooldown <= 0 && this.ammoInMag > 0; }
+  get isEquipping() { return this.equipRemaining > 0; }
 
-  /** Current spread in degrees given the shooter's movement state. */
+  /** §12.2 — fire is immediate; only equip, cooldown and ammo gate it. */
+  get canFire() {
+    return !this.reloading && this.cooldown <= 0 && this.equipRemaining <= 0 && this.ammoInMag > 0;
+  }
+
+  /** Called when this weapon becomes the active slot (§12). */
+  beginEquip() {
+    this.equipRemaining = this.def.equipTime;
+    this.cancelReload();
+  }
+
   spread(shooterState = {}) {
     return computeSpread({
       weaponId: this.id,
@@ -41,10 +58,8 @@ export class Weapon {
     });
   }
 
-  damageAt(distance, region = 'torso', pelletsHit = null) {
-    return computeDamage({
-      weaponId: this.id, rarity: this.rarity, region, distance, pelletsHit
-    });
+  damageAt(distance, region = 'torso') {
+    return singleHitDamage({ weaponId: this.id, rarity: this.rarity, region, distance });
   }
 
   get structureDamage() {
@@ -52,116 +67,162 @@ export class Weapon {
   }
 
   /**
-   * Attempt to fire. Consumes one round and starts the cooldown.
+   * Fire one shot. Consumes a round, starts the cooldown, applies recoil.
    * @returns {boolean} whether a shot was fired
    */
-  fire(bus = null) {
+  fire(bus = null, rng = null) {
     if (!this.canFire) return false;
     this.ammoInMag -= 1;
     this.cooldown = this.fireInterval;
     this.shotsInBurst += 1;
     this.timeSinceLastShot = 0;
-    bus?.emit(Events.WEAPON_FIRED, { weaponId: this.id, rarity: this.rarity, ammoLeft: this.ammoInMag });
+
+    const kick = recoilKick(this.id, rng);
+    this.recoil.pitch += kick.pitch;
+    this.recoil.yaw += kick.yaw;
+
+    bus?.emit(Events.WEAPON_FIRED, {
+      weaponId: this.id, rarity: this.rarity, ammoLeft: this.ammoInMag
+    });
     return true;
   }
 
-  /** Begin a reload from a reserve pool. Returns false if it would do nothing. */
   beginReload(reserveAmmo) {
-    if (this.reloading || this.ammoInMag >= this.def.magazine || reserveAmmo <= 0) return false;
+    if (this.reloading || this.equipRemaining > 0) return false;
+    if (this.ammoInMag >= this.def.magazine || reserveAmmo <= 0) return false;
     this.reloading = true;
     this.reloadRemaining = this.def.reloadTime;
     return true;
   }
 
-  /** §5.7 — switching slots cancels a reload. */
   cancelReload() {
     this.reloading = false;
     this.reloadRemaining = 0;
   }
 
   /**
-   * @param {number} dt
-   * @param {object} ctx { reserveAmmo, ads }
    * @returns {number} rounds consumed from the reserve this tick
    */
   update(dt, { reserveAmmo = 0, ads = false } = {}) {
     this.cooldown = Math.max(0, this.cooldown - dt);
+    this.equipRemaining = Math.max(0, this.equipRemaining - dt);
     this.timeSinceLastShot += dt;
     this.shotsInBurst = decayBloom(this.shotsInBurst, this.timeSinceLastShot, this.id, dt);
+    this.recoil = recoilRecover(this.recoil, this.id, dt);
 
-    const adsTime = this.def.adsTime;
-    const target = ads ? 1 : 0;
-    const step = dt / adsTime;
-    this.adsProgress = target > this.adsProgress
+    const step = dt / this.def.adsTime;
+    this.adsProgress = ads
       ? Math.min(1, this.adsProgress + step)
       : Math.max(0, this.adsProgress - step);
 
     if (!this.reloading) return 0;
-
     this.reloadRemaining -= dt;
     if (this.reloadRemaining > 0) return 0;
 
     this.reloading = false;
     this.reloadRemaining = 0;
-    const needed = this.def.magazine - this.ammoInMag;
-    const loaded = Math.min(needed, reserveAmmo);
+    const loaded = Math.min(this.def.magazine - this.ammoInMag, reserveAmmo);
     this.ammoInMag += loaded;
     return loaded;
   }
 }
 
 /**
- * Inventory — 6 slots, slot 0 is the harvesting tool and cannot be replaced. §5.7
+ * Inventory — FIVE combat slots plus a separate pickaxe (§15).
+ *
+ * The pickaxe is not a slot: it is bound to its own action and always available, so the
+ * five slots are all usable for weapons and consumables.
+ *
+ * Every operation is total — an item leaving a slot is placed elsewhere or returned to the
+ * caller to drop into the world. Nothing is ever discarded (§15).
  */
 export class Inventory {
   constructor() {
-    this.slots = new Array(INVENTORY.slots).fill(null);
-    this.slots[INVENTORY.toolSlot] = { kind: 'tool', id: 'harvestingTool' };
-    this.selected = INVENTORY.toolSlot;
+    this.slots = new Array(INVENTORY.combatSlots).fill(null);
+    this.selected = 0;
+    /** true when the pickaxe is out rather than a combat slot. */
+    this.pickaxeEquipped = true;
     this.switchCooldown = 0;
     this.ammo = { light: 0, medium: 0, heavy: 0, shells: 0, rockets: 0 };
   }
 
+  get size() {
+    return this.slots.length;
+  }
+
   get active() {
-    return this.slots[this.selected];
+    return this.pickaxeEquipped ? null : this.slots[this.selected];
   }
 
   get activeWeapon() {
-    const s = this.active;
-    return s?.kind === 'weapon' ? s.weapon : null;
+    const slot = this.active;
+    return slot?.kind === 'weapon' ? slot.weapon : null;
   }
 
-  /** @returns {boolean} whether the slot changed */
-  select(index) {
-    if (index < 0 || index >= this.slots.length) return false;
-    if (index === this.selected || this.switchCooldown > 0) return false;
-    this.activeWeapon?.cancelReload(); // §5.7
-    this.selected = index;
+  /** Equip the pickaxe (§14) — its own action, not a slot. */
+  equipPickaxe() {
+    if (this.pickaxeEquipped) return false;
+    this.activeWeapon?.cancelReload();
+    this.pickaxeEquipped = true;
     this.switchCooldown = INVENTORY.switchTime;
     return true;
   }
 
-  /** Put an item in the first free non-tool slot, or in the selected slot if full. */
+  /** Select a combat slot by index. */
+  select(index) {
+    if (index < 0 || index >= this.slots.length) return false;
+    if (this.switchCooldown > 0) return false;
+    if (!this.pickaxeEquipped && index === this.selected) return false;
+
+    this.activeWeapon?.cancelReload();   // §15 — switching cancels a reload
+    this.selected = index;
+    this.pickaxeEquipped = false;
+    this.switchCooldown = INVENTORY.switchTime;
+    this.activeWeapon?.beginEquip();
+    return true;
+  }
+
+  /** Mouse wheel cycling (§15). */
+  cycle(direction) {
+    const next = (this.selected + (direction > 0 ? 1 : -1) + this.slots.length) % this.slots.length;
+    const wasCooling = this.switchCooldown;
+    this.switchCooldown = 0;
+    const ok = this.select(next);
+    if (!ok) this.switchCooldown = wasCooling;
+    return ok;
+  }
+
+  /**
+   * Add an item. Prefers an empty slot; otherwise replaces the selected slot and RETURNS
+   * what was displaced so the caller drops it into the world (§15, §16).
+   * @returns {{slot:number, replaced:object|null}}
+   */
   add(item) {
-    for (let i = 0; i < this.slots.length; i++) {
-      if (i === INVENTORY.toolSlot) continue;
-      if (this.slots[i] === null) {
-        this.slots[i] = item;
-        return { slot: i, replaced: null };
-      }
+    const empty = this.slots.indexOf(null);
+    if (empty >= 0) {
+      this.slots[empty] = item;
+      return { slot: empty, replaced: null };
     }
-    const target = this.selected === INVENTORY.toolSlot ? 1 : this.selected;
+    const target = this.selected;
     const replaced = this.slots[target];
     this.slots[target] = item;
     return { slot: target, replaced };
   }
 
-  /** Drop a slot's contents. The tool slot cannot be dropped (§5.7). */
+  /** Remove and return a slot's contents. */
   drop(index) {
-    if (index === INVENTORY.toolSlot) return null;
+    if (index < 0 || index >= this.slots.length) return null;
     const item = this.slots[index];
     this.slots[index] = null;
     return item;
+  }
+
+  /** Swap two slots — reordering never loses an item (§15). */
+  reorder(from, to) {
+    if (from < 0 || from >= this.slots.length) return false;
+    if (to < 0 || to >= this.slots.length) return false;
+    [this.slots[from], this.slots[to]] = [this.slots[to], this.slots[from]];
+    return true;
   }
 
   addAmmo(type, amount) {
@@ -172,11 +233,16 @@ export class Inventory {
     return this.ammo[type] - before;
   }
 
-  update(dt) {
+  /** Total item count, for the "never randomly delete items" invariant. */
+  get itemCount() {
+    return this.slots.filter((s) => s !== null).length;
+  }
+
+  update(dt, { ads = false } = {}) {
     this.switchCooldown = Math.max(0, this.switchCooldown - dt);
     const weapon = this.activeWeapon;
     if (!weapon) return;
-    const consumed = weapon.update(dt, { reserveAmmo: this.ammo[weapon.ammoType] ?? 0 });
+    const consumed = weapon.update(dt, { reserveAmmo: this.ammo[weapon.ammoType] ?? 0, ads });
     if (consumed > 0) this.ammo[weapon.ammoType] -= consumed;
   }
 }
