@@ -13,9 +13,9 @@ import {
   buildCharacterRig, partColour, PartShape
 } from '../cosmetics/CharacterRig.js';
 import { skinOrFallback } from '../cosmetics/SkinDefinitions.js';
-import { buildToolRig } from '../cosmetics/ToolRig.js';
+import { buildToolRig, carryTransform } from '../cosmetics/ToolRig.js';
 import { toolOrFallback } from '../cosmetics/ToolDefinitions.js';
-import { CHARACTER, PICKAXE_VIEW } from '../core/Config.js';
+import { CHARACTER } from '../core/Config.js';
 
 /** Shared geometries: every part is a unit primitive scaled to its size. */
 const UNIT = {
@@ -131,20 +131,24 @@ export class CharacterView {
   }
 
   /**
-   * Seat the tool group at the right hand.
+   * Seat the tool group in the right hand, held at the side (SKIN_SPEC §11.6).
    *
-   * Read off the rig's own hand part rather than hard-coded: a heavy frame's hand sits
+   * Read off the rig's own metrics rather than hard-coded: a heavy frame's hand sits
    * further out than a lean one's, and the tool has to follow it.
+   *
+   * The pose itself is solved by `carryTransform` — pure geometry, tested in Node — so this
+   * file stays a translator, per its own contract above.
+   *
+   * This is the ONLY transform the view gives a tool: there is no swing animation in the
+   * view layer, so the same pose holds through idle, walking, sprinting and crouching.
+   * Swinging is gameplay (PICKAXE in Config) plus an audio cue, and nothing here touches it.
    */
   _placeToolInHand() {
     const m = this.rig?.metrics;
     if (!m) return;
-    this.toolGroup.position.set(
-      m.armX + PICKAXE_VIEW.gripOut,
-      m.shoulderY - m.armLength - PICKAXE_VIEW.gripDrop,
-      m.armDepth * 0.3
-    );
-    this.toolGroup.rotation.set(PICKAXE_VIEW.carryPitch, 0, PICKAXE_VIEW.carryRoll);
+    const { position, rotation } = carryTransform(m, this.tool?.headScale ?? 1);
+    this.toolGroup.position.set(position.x, position.y, position.z);
+    this.toolGroup.rotation.set(rotation.x, rotation.y, rotation.z);
   }
 
   _build(parts, owner, parent, idPrefix) {

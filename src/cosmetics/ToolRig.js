@@ -43,6 +43,77 @@ export function toolMetrics(headScale = 1) {
   };
 }
 
+/* ── carry pose ──────────────────────────────────────────────────────────── */
+
+/**
+ * Where a carried tool sits relative to the character rig (SKIN_SPEC §11.6).
+ *
+ * Pure geometry, so it is testable in Node and the view stays a translator. Returns a
+ * position in rig space and an Euler rotation (three.js order XYZ) for the tool group.
+ *
+ * THE POSE: held in the hand at the side, head angled DOWN and OUTWARD. It is stated as a
+ * direction, because that is what the pose means; the Euler angles are solved from it. The
+ * previous pose tipped the head up and behind the shoulder, which read as a back-mounted
+ * accessory lying across the character's own silhouette.
+ *
+ * Two things make it work on every build:
+ *
+ *  - The hand closes PART-WAY UP the haft, as it would on a real tool carried at the side.
+ *    A tool is longer than a character's hand is high, so gripping the butt would drag the
+ *    head through the floor at any genuine downward angle.
+ *  - The tilt is CLAMPED to what the rig can carry. The stout mascot build has a very large
+ *    head, which drops its shoulders, and full-length arms — its hand sits barely a third of
+ *    a metre off the ground. Every other build takes the full angle unchanged.
+ */
+export function carryTransform(metrics, headScale = 1) {
+  const hand = {
+    x: metrics.armX + PICKAXE_VIEW.gripOut,
+    y: metrics.shoulderY - metrics.armLength - PICKAXE_VIEW.gripDrop,
+    z: metrics.armDepth * 0.3
+  };
+
+  const tm = toolMetrics(headScale);
+  const reach = Math.max(1e-3, tm.gripToHead - PICKAXE_VIEW.carryGrip);
+  const clearance = tm.headHeight / 2 + PICKAXE_VIEW.carryClearance;
+
+  const drop = Math.min(
+    PICKAXE_VIEW.carryDrop,
+    Math.asin(Math.min(1, Math.max(0, hand.y - clearance) / reach))
+  );
+
+  // Unit direction from the grip toward the head. Rig space: +Y runs up the haft.
+  const flat = Math.cos(drop);
+  const direction = {
+    x: Math.sin(PICKAXE_VIEW.carrySwing) * flat,
+    y: -Math.sin(drop),
+    z: Math.cos(PICKAXE_VIEW.carrySwing) * flat
+  };
+
+  return {
+    direction,
+    // Seat the rig so the HAND lands on the grip point, `carryGrip` up the haft.
+    position: {
+      x: hand.x - direction.x * PICKAXE_VIEW.carryGrip,
+      y: hand.y - direction.y * PICKAXE_VIEW.carryGrip,
+      z: hand.z - direction.z * PICKAXE_VIEW.carryGrip
+    },
+    // Euler XYZ taking local +Y onto `direction`.
+    rotation: { x: Math.atan2(direction.z, direction.y), y: 0, z: -Math.asin(direction.x) },
+    // Handy for tests and tools: where the head and the butt end up.
+    head: {
+      x: hand.x + direction.x * reach,
+      y: hand.y + direction.y * reach,
+      z: hand.z + direction.z * reach
+    },
+    butt: {
+      x: hand.x - direction.x * (tm.gripToButt + PICKAXE_VIEW.carryGrip),
+      y: hand.y - direction.y * (tm.gripToButt + PICKAXE_VIEW.carryGrip),
+      z: hand.z - direction.z * (tm.gripToButt + PICKAXE_VIEW.carryGrip)
+    },
+    headHalfHeight: tm.headHeight / 2
+  };
+}
+
 /* ── haft ────────────────────────────────────────────────────────────────── */
 
 const HAFT_BUILDERS = {

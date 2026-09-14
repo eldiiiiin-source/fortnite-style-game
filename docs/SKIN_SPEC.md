@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
-| Version | 1.3.0 |
+| Version | 1.3.1 |
 | Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
 | Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
 | Implementation | Complete |
@@ -469,6 +469,31 @@ Shop, locker and lobby previews paint the tool rig on the diagonal. In match, th
 parented to the character's right hand, read off the rig's own hand position so a heavy
 frame's tool sits further out than a lean frame's.
 
+**The carry pose is a HELD TOOL, not a back accessory.** When the player is not swinging —
+idle, walking, sprinting, crouching — the tool hangs in the hand at the side, head angled
+down and a little forward. It must never sit across the back or the flank: a tool tipped
+up behind the shoulder lies over the character's own silhouette, which is the one thing a
+third-person avatar cannot afford.
+
+Stated as constraints, all of which hold for every outfit carrying every tool:
+
+- The head stays in FRONT of the character, never behind.
+- The head points downward, never upward.
+- The head stays outboard of the torso and below the shoulder, so it covers neither the
+  body nor the crosshair.
+- The head clears the ground.
+- The haft butt may sit beside the hip but never passes through the body.
+- Every tool carries at the SAME angle. Tools differ only in looks (ITEM_SHOP_SPEC §4.4),
+  so a pose that varied by tool would read as a difference in reach.
+
+The pose is authored as a DIRECTION — down and outward — and the rotation is solved from
+it, because the direction is what the pose means. The tilt is clamped to what each rig can
+carry: the stout build's hand sits barely a third of a metre off the ground, so its tool
+levels off rather than dragging through the floor.
+
+There is no swing animation in the view layer. This pose is the only transform a tool
+receives, and swing timing, damage and reach are gameplay values that none of it touches.
+
 ## 12. Render fidelity
 
 Flat fills read as placeholder art. One lighting model is applied to whatever any rig
@@ -491,6 +516,7 @@ emits — never per-item artwork, which is why adding a cosmetic never means dra
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.3.1 | 2026-09-14 | §11.6: harvesting tools are carried in the hand at the side, angled down and forward, instead of tipped up behind the shoulder where they lay across the character's silhouette. Pose authored as a direction and clamped per rig. |
 | 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |
 | 1.3.0 | 2026-09-14 | [OWNER] Fidelity pass on the signature four and Scrapjaw: costume layering vocabulary (§6.4), bevelled parts (§6.5), revised silhouettes (§7.3), salvage haft, per-tool head scale and a rebuilt Scrapjaw head (§11). IDs, rarity and pricing unchanged. |
 | 1.2.0 | 2026-09-14 | [OWNER] Emissive structural pattern exception (§6.3): the accent limit is a real limit again, with one narrow declared and measured exception. Rarity is explicitly not a qualifying reason. Voidmarrow approved under it. |

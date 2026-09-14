@@ -168,15 +168,33 @@ export const PICKAXE_VIEW = Object.freeze({
   headWidth: CHARACTER.radius * 1.5,
   headHeight: CHARACTER.radius * 0.95,
   headDepth: CHARACTER.radius * 0.55,
-  /**
-   * Where the tool sits in the hand when carried, relative to the character rig.
-   * The roll is NEGATIVE so the head leans away from the body — a positive roll tips it
-   * into the torso, where it clips the chest from behind the shoulder.
-   */
+  /** Where the hand sits relative to the character rig when carrying. */
   gripDrop: CHARACTER.height * 0.03,
   gripOut: CHARACTER.radius * 0.3,
-  carryPitch: -0.5,
-  carryRoll: -0.3
+
+  /**
+   * CARRY POSE (SKIN_SPEC §11.6) — a tool held in the hand at the side, angled down and
+   * a little forward. It is NOT slung across the back: the previous pose tipped the head
+   * up and behind the shoulder, which read as a back-mounted accessory rather than as a
+   * held tool, and put the head across the character's own silhouette.
+   *
+   * Expressed as a DIRECTION rather than as Euler angles, because the direction is what
+   * the pose actually means — the head points down-and-out — and the view solves the
+   * rotation from it. Angles are radians.
+   */
+  carryDrop: 0.90,      // below horizontal: ~52°, so the head hangs beside the thigh
+  carrySwing: 0.52,     // outward from straight ahead: ~30°, so the haft BUTT clears the hip
+
+  /**
+   * How far up the haft the hand closes when carrying. A pickaxe carried at the side is
+   * gripped near its balance point, not at the butt — and the geometry needs it: the tool
+   * is longer than a character's hand is high, so gripping the butt would drag the head
+   * through the floor at any real downward angle.
+   */
+  carryGrip: CHARACTER.height * 0.06,
+
+  /** Air the head keeps under it, so a carried tool never scrapes the ground. */
+  carryClearance: CHARACTER.radius * 0.15
 });
 
 /* ══ CAMERA — MASTER_SPEC §7 ═════════════════════════════════════════════════ */

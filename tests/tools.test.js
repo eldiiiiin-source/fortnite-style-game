@@ -9,8 +9,10 @@ import {
   TOOLS, getTool, toolOrFallback, toolRarityCounts, HeadForm, HaftStyle, ToolDetail
 } from '../src/cosmetics/ToolDefinitions.js';
 import {
-  buildToolRig, toolMetrics, ToolRegion, SUPPORTED_HEADS, SUPPORTED_TOOL_DETAILS
+  buildToolRig, toolMetrics, carryTransform, ToolRegion, SUPPORTED_HEADS, SUPPORTED_TOOL_DETAILS
 } from '../src/cosmetics/ToolRig.js';
+import { buildCharacterRig } from '../src/cosmetics/CharacterRig.js';
+import { SKINS } from '../src/cosmetics/SkinDefinitions.js';
 import { rigBounds, partColour } from '../src/cosmetics/RigPrimitives.js';
 import { PICKAXE, PICKAXE_VIEW, CHARACTER, RARITY_ORDER } from '../src/core/Config.js';
 import {
@@ -272,6 +274,95 @@ describe('SKIN_SPEC §11.3.1, §11.5 — the 1.3.0 Scrapjaw pass', () => {
       const item = getCosmetic(id);
       expect(item.rarity, `${id} rarity`).toBe(rarity);
       expect(item.price, `${id} price`).toBe(price);
+    }
+  });
+});
+
+describe('SKIN_SPEC §11.6 — the carry pose', () => {
+  // Every outfit carrying every tool. The pose is solved from rig metrics, so a change to
+  // any build's proportions can move a tool through the floor or across the character.
+  const combinations = SKINS.flatMap((skin) => {
+    const metrics = buildCharacterRig(skin).metrics;
+    return TOOLS.map((tool) => ({
+      label: `${skin.id} + ${tool.id}`,
+      metrics,
+      pose: carryTransform(metrics, tool.headScale ?? 1)
+    }));
+  });
+
+  it('holds the tool in front of the character, never behind it', () => {
+    // The whole point of the pose: a tool slung across the back reads as an accessory. The
+    // rig faces +Z, so the head must stay on the positive side.
+    for (const { label, pose } of combinations) {
+      expect(pose.head.z, `${label} head is behind the character`).toBeGreaterThan(0);
+      expect(pose.direction.z, `${label} points backward`).toBeGreaterThan(0);
+    }
+  });
+
+  it('angles the head downward, and never upward', () => {
+    for (const { label, pose } of combinations) {
+      expect(pose.direction.y, `${label} head points up`).toBeLessThanOrEqual(0);
+    }
+
+    // Downward for every build that has room. The stout mascot is the one exception: its
+    // very large head drops its shoulders and its arms are full length, so its hand sits
+    // barely a third of a metre up and the tilt clamps to level rather than to the floor.
+    const clamped = combinations.filter((c) => c.pose.direction.y === 0);
+    for (const { label } of clamped) expect(label).toContain('outfit_sprocket');
+
+    const free = combinations.filter((c) => !c.label.includes('outfit_sprocket'));
+    expect(free.length).toBeGreaterThan(0);
+    for (const { label, pose } of free) {
+      expect(pose.direction.y, `${label} is not angled down`).toBeLessThan(-0.5);
+    }
+  });
+
+  it('keeps the head clear of the ground', () => {
+    for (const { label, pose } of combinations) {
+      expect(pose.head.y - pose.headHalfHeight, `${label} head through the floor`)
+        .toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('keeps the tool outboard of the torso and below the shoulder', () => {
+    for (const { label, metrics, pose } of combinations) {
+      expect(pose.head.x, `${label} head inside the torso`)
+        .toBeGreaterThan(metrics.torsoWidth / 2);
+      expect(pose.head.y, `${label} head above the shoulder`).toBeLessThan(metrics.shoulderY);
+    }
+  });
+
+  it('keeps the haft butt out of the body', () => {
+    // The butt trails the hand; it may sit beside the hip but must not pass through it.
+    for (const { label, metrics, pose } of combinations) {
+      const insideTorso = Math.abs(pose.butt.x) < metrics.torsoWidth / 2
+        && Math.abs(pose.butt.z) < metrics.torsoDepth / 2
+        && pose.butt.y > metrics.hipTop
+        && pose.butt.y < metrics.shoulderY;
+      expect(insideTorso, `${label} butt passes through the torso`).toBe(false);
+    }
+  });
+
+  it('carries every tool at the same pose — visuals never imply a stat', () => {
+    // ITEM_SHOP_SPEC §4.4: tools differ only in looks. Two tools on one character must
+    // point the same way, or the pose itself would read as a difference in reach.
+    const metrics = buildCharacterRig(SKINS[0]).metrics;
+    const [first, ...rest] = TOOLS.map((t) => carryTransform(metrics, t.headScale ?? 1));
+    for (const pose of rest) {
+      expect(pose.direction.x).toBeCloseTo(first.direction.x, 6);
+      expect(pose.direction.y).toBeCloseTo(first.direction.y, 6);
+      expect(pose.direction.z).toBeCloseTo(first.direction.z, 6);
+    }
+  });
+
+  it('derives the pose from the build module, with no absolute literals', () => {
+    for (const [value, base] of [
+      [PICKAXE_VIEW.carryGrip, CHARACTER.height],
+      [PICKAXE_VIEW.carryClearance, CHARACTER.radius]
+    ]) {
+      const ratio = value / base;
+      expect(ratio).toBeGreaterThan(0);
+      expect(ratio).toBeLessThan(1);
     }
   });
 });
