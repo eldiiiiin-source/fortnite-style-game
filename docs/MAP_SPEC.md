@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.0.0 |
+| Version | 1.1.0 |
 | Supersedes | Baseline v0.1.0 ("Cinder Isle") — void |
 | Companion | `docs/MASTER_SPEC.md`, `references/map/` |
 
@@ -291,6 +291,109 @@ visible gameplay hitches during combat.**
 9. Create the first polished test region only after core systems are stable
 10. Run tests, lint and build after each major phase
 
+## 20. First playable island — visual overhaul [OWNER, 2026-09-14]
+
+**[OWNER] direction:** *"I want the game to visually jump from prototype field to real
+stylized battle royale island."* The characters are ahead of the world; this section is the
+world catching up. It supersedes §18's "keep map work limited to what gameplay testing
+needs" — that constraint applied while the core systems were being proven, and they now are.
+
+Priority order when any two goals conflict, owner-set:
+**1. gameplay readability · 2. third-person combat clarity · 3. visual identity ·
+4. traversal quality · 5. beauty · 6. extra detail.**
+
+### 20.1 The architectural decision: POI structures are build pieces
+
+Every building on the island is placed into the **existing build grid** as real
+`BuildPiece`s at match start, not as decorative meshes.
+
+This is the single most important choice in the overhaul, because it buys, with no change
+to the collision hot path:
+
+- collision — a house stops bullets and bodies because every piece already does;
+- destructibility — players harvest and blow through walls exactly as they do their own;
+- cover and build interaction — structures participate in build fights natively;
+- rendering — the instanced wood/brick/metal meshes already draw them.
+
+The alternative, static world colliders, would mean touching `CollisionWorld`, which is the
+one system a visual pass must not destabilise. **No new collision path may be added for
+world art.** Anything that must block a player is a build piece; anything that need not is
+visual only.
+
+### 20.2 Terrain form
+
+Hand-authored, not noise. The heightfield is a sum of named smooth primitives — domes,
+ridges, basins, plateaus and a carved river valley — each with zero gradient at its rim, so
+nothing catches the player (§4). A low-amplitude, long-wavelength roll is layered over the
+whole island so no area is billiard-table flat, capped well under the step height so it
+never affects movement.
+
+Required forms: rolling hills, at least one steeper cliff edge, flat combat plateaus
+between elevation shifts, and a valley the water runs through.
+
+### 20.3 Water
+
+A winding river from high ground to the coast, plus a lake. Both are carved **below sea
+level** into the heightfield, so the existing single sea plane renders them with no new
+water system. Shorelines are graded, not stepped: a sand band, then grass.
+
+### 20.4 Roads
+
+A polyline network joining the POIs. A road flattens the terrain under it toward its own
+centreline height, so a road is always walkable and always reads as a route from the air.
+Roads are a surface type, not a prop.
+
+### 20.5 Surface types
+
+The terrain reports a surface at every point — `grass`, `dirt`, `sand`, `rock`, `road`,
+`field` — driven by height, slope, water proximity and the road network. Terrain meshes are
+vertex-coloured from it, and the minimap samples the same function, so the map and the
+world can never disagree about where the river or the roads are.
+
+### 20.6 Vegetation
+
+Instanced trees, boulders and bushes, placed by an authored cluster list rather than
+scattered uniformly (§9). Placement respects roads, water and POI footprints. Trees and
+rocks that are harvestable are the same entries the loot layer already consumes.
+
+### 20.7 POIs for the first island
+
+Six original locations, deliberately small and readable. Names are working identity, not
+final branding, and none reproduces any existing game's location.
+
+| POI | Identity | Combat role |
+| --- | --- | --- |
+| Hollow Farm | Barn, silo, farmhouse, fenced field | Long sightlines, big interior |
+| Pumpjack Stop | Roadside service building, canopy, pumps | Fast loot, close quarters |
+| Kettle Row | Small cluster of pitched-roof houses | Urban rotation, rooftop fights |
+| Riverwatch | Dock and stilted cabin on the water | Low ground, exposed approach |
+| Crown Post | Hilltop outpost with a tower | High ground, long range |
+| Dray Yard | Warehouse and container yard | Hard cover, industrial interior |
+
+Each must have a distinct silhouette, interior or sheltered loot, cover to fight from, and
+enough open ground beside it to build in.
+
+### 20.8 Lighting and atmosphere
+
+Bright stylised daytime. A warm low-angle key light with a cool sky ambient, a sky gradient
+rather than a flat fill, and fog tuned to give depth without haze. Characters and build
+pieces must stay the highest-contrast things on screen — the world is the backdrop, never
+the subject.
+
+### 20.9 Required tests
+
+1. The island exposes the same terrain API the region did, so every consumer keeps working.
+2. Terrain is continuous: sampled 0.1 m apart, no height delta anywhere on the island
+   exceeds a step height. Measured at a fine spacing deliberately — a cliff is *steep*, and
+   a test at 1 m spacing would either ban cliffs or prove nothing about continuity.
+3. Every road point is walkable.
+4. Water sits below sea level and land beside it above, so shorelines read.
+5. Every POI footprint is on walkable, non-flooded ground.
+6. POI structures are build pieces and appear in the grid.
+7. Vegetation never spawns on a road, in water, or inside a POI footprint.
+8. The spawn point and every bot spawn is on dry walkable land.
+9. Loot, props and bot spawns stay inside the island bounds.
+
 ## 19. Final standard [OWNER]
 
 > "An original bright, peaceful, readable battle royale island with strong early Chapter 2
@@ -309,5 +412,6 @@ stronger landmarks, better performance.**
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.1.0 | 2026-09-14 | [OWNER] First playable island visual overhaul (§20): hand-authored terrain form, river and lake carved below sea level, road network, surface types, authored vegetation clusters, six original POIs, and the decision that POI structures are build pieces so no new collision path is added. |
 | 1.0.0 | 2026-09-13 | Replaced the "Cinder Isle" baseline with the owner's authoritative map specification. Voids: the 190 m central massif, the high-frequency detail noise layer, uniform vegetation scatter, the 15 invented POIs, and the absence of any water system. Adds the reference-image category rules, the connected water network, countryside-first philosophy, and architecture derived from the build module. |
 | 0.1.0 | 2026-09-13 | Initial baseline placeholder. Void. |

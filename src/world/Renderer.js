@@ -22,13 +22,40 @@ const STORM_WALL_HEIGHT = WALL_H * 30;
 
 /** MAP_SPEC §10 palette — bright, clean, stylised. */
 const PALETTE = Object.freeze({
-  sky: 0x8fc4e8,
-  grass: 0x6faa4a,
-  rock: 0x9a9a94,
+  sky: 0x9ad2f0,
+  skyHorizon: 0xdceffb,
+  grass: 0x6fb04a,
   water: 0x3fb9c9,
-  sun: 0xfff6e6,
-  ambientSky: 0xbdd7f5,
-  ambientGround: 0x5a6b45
+  sun: 0xfff4e0,
+  ambientSky: 0xcfe6fb,
+  ambientGround: 0x6a7a4a
+});
+
+/**
+ * Ground colours by surface type (MAP_SPEC §20.5).
+ *
+ * Deliberately close in value and separated by HUE. Characters and build pieces have to
+ * stay the highest-contrast things on screen (§20.8), so the ground reads as varied
+ * without ever competing with them.
+ */
+const SURFACE_COLOURS = Object.freeze({
+  grass: 0x6fb04a,
+  field: 0x9cb457,
+  dirt: 0x9a8460,
+  sand: 0xd9cf9a,
+  rock: 0x9a9a94,
+  road: 0x7c7568
+});
+
+/** Vegetation colours — SKIN-adjacent but world-owned. */
+const FLORA = Object.freeze({
+  trunk: 0x6b4a2f,
+  canopyA: 0x4f9440,
+  canopyB: 0x3f8038,
+  canopyC: 0x67a84a,
+  rock: 0x8f8f89,
+  rockDark: 0x75756f,
+  bush: 0x559442
 });
 
 export class Renderer {
@@ -69,7 +96,7 @@ export class Renderer {
 
   /** MAP_SPEC §10 — soft sunlight, readable shadows, clear silhouettes. */
   _setupLighting() {
-    const sun = new THREE.DirectionalLight(PALETTE.sun, 2.1);
+    const sun = new THREE.DirectionalLight(PALETTE.sun, 2.35);
     const elevation = 55 * Math.PI / 180;
     sun.position.set(Math.cos(elevation) * 200, Math.sin(elevation) * 200, 90);
     sun.castShadow = true;
@@ -80,22 +107,159 @@ export class Renderer {
     this.scene.add(sun.target);
     this.sun = sun;
 
-    this.scene.add(new THREE.HemisphereLight(PALETTE.ambientSky, PALETTE.ambientGround, 0.75));
+    this.scene.add(new THREE.HemisphereLight(PALETTE.ambientSky, PALETTE.ambientGround, 0.8));
+    this._setupSky();
+  }
+
+  /**
+   * A sky dome with a vertical gradient (MAP_SPEC §20.8).
+   *
+   * A flat background colour gives the horizon nothing to sit against, which is most of
+   * why the old world read as a field rather than as a place. The dome is drawn on the
+   * inside with lighting off, so it costs one draw call and never picks up the sun.
+   */
+  _setupSky() {
+    // Radius stays INSIDE the camera's far plane. Sized past it, the dome is clipped and
+    // the cut edge reads as a hard arc across the sky — which is worse than no dome at all.
+    // The performance governor can shorten `camera.far`, so `updateSkyScale` follows it.
+    const radius = WORLD.terrainDrawDistance * 0.9;
+    const geo = new THREE.SphereGeometry(radius, 24, 16);
+    const top = new THREE.Color(PALETTE.sky);
+    const horizon = new THREE.Color(PALETTE.skyHorizon);
+    const colours = new Float32Array(geo.attributes.position.count * 3);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      // Normalised height up the dome, eased so the gradient sits low and wide.
+      const t = Math.max(0, pos.getY(i) / radius);
+      const c = horizon.clone().lerp(top, Math.pow(t, 0.55));
+      colours[i * 3] = c.r;
+      colours[i * 3 + 1] = c.g;
+      colours[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+    const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false
+    }));
+    sky.renderOrder = -1;
+    this.scene.add(sky);
+    this.sky = sky;
+    this.skyRadius = radius;
+  }
+
+  /** Keep the sky dome inside whatever far plane the performance governor has chosen. */
+  _fitSkyToCamera() {
+    if (!this.sky) return;
+    const scale = Math.min(1, (this.camera.far * 0.9) / this.skyRadius);
+    this.sky.scale.setScalar(scale);
   }
 
   _setupTerrain() {
     this.terrainGroup = new THREE.Group();
     this.scene.add(this.terrainGroup);
     this.chunkMeshes = new Map();
-    this.terrainMaterial = new THREE.MeshLambertMaterial({ color: PALETTE.grass });
+    // Vertex-coloured: one material for the whole island, coloured per vertex from the
+    // terrain's own surface function, so grass, dirt, sand, rock and road all draw in the
+    // same pass and the map cannot disagree with the world about where they are (§20.5).
+    this.terrainMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
     const water = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD.regionExtent * 3, WORLD.regionExtent * 3),
-      new THREE.MeshLambertMaterial({ color: PALETTE.water, transparent: true, opacity: 0.82 })
+      new THREE.MeshLambertMaterial({ color: PALETTE.water, transparent: true, opacity: 0.86 })
     );
     water.rotation.x = -Math.PI / 2;
     water.position.y = WORLD.seaLevel - 0.05;
     this.scene.add(water);
+
+    this._setupVegetation();
+  }
+
+  /**
+   * Trees, boulders and bushes as instanced meshes (MAP_SPEC §20.6).
+   *
+   * The old world placed harvestable trees and rocks as gameplay entities and drew nothing
+   * for them — the single biggest reason it looked like an empty field. One InstancedMesh
+   * per part keeps the whole nature layer at a handful of draw calls.
+   */
+  _setupVegetation() {
+    this.floraGroup = new THREE.Group();
+    this.scene.add(this.floraGroup);
+
+    const layout = this.terrain.layout?.();
+    if (!layout) return;
+
+    const dummy = new THREE.Object3D();
+    const ground = (x, z) => this.terrain.heightAt(x, z);
+
+    const addInstances = (geometry, colour, entries, place) => {
+      if (entries.length === 0) return;
+      const mesh = new THREE.InstancedMesh(
+        geometry, new THREE.MeshLambertMaterial({ color: colour }), entries.length
+      );
+      entries.forEach((entry, i) => {
+        place(dummy, entry);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;
+      mesh.instanceMatrix.needsUpdate = true;
+      this.floraGroup.add(mesh);
+      return mesh;
+    };
+
+    const trees = layout.trees ?? [];
+    const trunkH = WALL_H * 0.85;
+    addInstances(
+      new THREE.CylinderGeometry(TILE * 0.052, TILE * 0.075, trunkH, 7),
+      FLORA.trunk, trees,
+      (d, tree) => {
+        d.position.set(tree.x, ground(tree.x, tree.z) + trunkH * 0.5 * tree.scale, tree.z);
+        d.rotation.set(0, tree.x * 0.7, 0);
+        d.scale.set(tree.scale, tree.scale, tree.scale);
+      }
+    );
+
+    // Canopies split by variant so a wood is not one repeated silhouette.
+    const canopyColours = [FLORA.canopyA, FLORA.canopyB, FLORA.canopyC];
+    for (let variant = 0; variant < 3; variant++) {
+      const group = trees.filter((tree) => tree.variant === variant);
+      const canopyH = WALL_H * (1.25 + variant * 0.2);
+      const radius = TILE * (0.33 + variant * 0.04);
+      const geometry = variant === 1
+        ? new THREE.SphereGeometry(radius, 8, 6)
+        : new THREE.ConeGeometry(radius, canopyH, 8);
+      addInstances(geometry, canopyColours[variant], group, (d, tree) => {
+        const lift = variant === 1 ? trunkH * 0.95 + radius * 0.6 : trunkH * 0.9 + canopyH * 0.42;
+        d.position.set(tree.x, ground(tree.x, tree.z) + lift * tree.scale, tree.z);
+        d.rotation.set(0, tree.z * 0.6, 0);
+        d.scale.set(tree.scale, tree.scale, tree.scale);
+      });
+    }
+
+    const rocks = layout.rocks ?? [];
+    for (let variant = 0; variant < 2; variant++) {
+      const group = rocks.filter((rock) => rock.variant === variant);
+      const radius = TILE * (0.24 + variant * 0.1);
+      addInstances(
+        new THREE.DodecahedronGeometry(radius, 0),
+        variant === 0 ? FLORA.rock : FLORA.rockDark, group,
+        (d, rock) => {
+          d.position.set(rock.x, ground(rock.x, rock.z) + radius * 0.45 * rock.scale, rock.z);
+          d.rotation.set(rock.x * 0.3, rock.z * 0.5, 0.2);
+          d.scale.set(rock.scale, rock.scale * 0.8, rock.scale);
+        }
+      );
+    }
+
+    const bushes = layout.bushes ?? [];
+    addInstances(
+      new THREE.SphereGeometry(TILE * 0.16, 7, 5), FLORA.bush, bushes,
+      (d, bush) => {
+        d.position.set(bush.x, ground(bush.x, bush.z) + TILE * 0.1 * bush.scale, bush.z);
+        d.rotation.set(0, bush.x * 0.9, 0);
+        d.scale.set(bush.scale, bush.scale * 0.72, bush.scale);
+      }
+    );
   }
 
   _buildChunk(cx, cz, resolution = 33) {
@@ -109,11 +273,23 @@ export class Renderer {
     const pos = geo.attributes.position;
     const ox = cx * size;
     const oz = cz * size;
+    const colours = new Float32Array(pos.count * 3);
+    const colour = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i) + ox + size / 2;
       const z = pos.getZ(i) + oz + size / 2;
       pos.setY(i, this.terrain.heightAt(x, z));
+
+      const surface = this.terrain.surfaceAt?.(x, z) ?? 'grass';
+      colour.setHex(SURFACE_COLOURS[surface] ?? SURFACE_COLOURS.grass);
+      // A gentle per-vertex value shift keeps a large field of one surface from reading as
+      // flat paint, without introducing a second colour.
+      const variation = 1 + Math.sin(x * 0.07) * 0.03 + Math.cos(z * 0.09) * 0.03;
+      colours[i * 3] = colour.r * variation;
+      colours[i * 3 + 1] = colour.g * variation;
+      colours[i * 3 + 2] = colour.b * variation;
     }
+    geo.setAttribute('color', new THREE.BufferAttribute(colours, 3));
     geo.computeVertexNormals();
 
     const mesh = new THREE.Mesh(geo, this.terrainMaterial);
@@ -498,6 +674,11 @@ export class Renderer {
   }
 
   syncCamera(playerCamera) {
+    if (this.sky) {
+      // Centre the dome on the viewer: a fixed dome is one the player can walk out of.
+      this.sky.position.set(playerCamera.position.x, 0, playerCamera.position.z);
+      this._fitSkyToCamera();
+    }
     this.camera.position.set(
       playerCamera.position.x, playerCamera.position.y, playerCamera.position.z
     );

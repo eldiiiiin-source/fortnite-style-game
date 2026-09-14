@@ -262,6 +262,10 @@ export class AdminService {
   setMaterials(amount) {
     return this._guard(() => {
       if (!this.game) return fail('noMatch');
+      // Reject anything that is not a real number. Without this, a bad argument clamps to
+      // NaN and writes NaN into the player's materials, which then shows in the HUD and
+      // poisons every build cost from that point on.
+      if (!Number.isFinite(amount)) return fail('invalidAmount');
       const n = Math.max(0, Math.min(MATERIAL_CAP, amount));
       for (const m of MATERIAL_ORDER) this.game.player.materials[m] = n;
       return ok({ materials: n });

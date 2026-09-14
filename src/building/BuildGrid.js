@@ -52,6 +52,19 @@ export class BuildGrid {
     this.revision = 0;
   }
 
+  /**
+   * Pieces a PLAYER placed, excluding the island's own structures (MAP_SPEC §20.1).
+   *
+   * World structures are real build pieces with ownerId 0, so `pieceCount` counts them —
+   * correctly, since they collide and can be destroyed. Anything asking "did player state
+   * leak between matches?" needs this instead.
+   */
+  get playerPieceCount() {
+    let n = 0;
+    for (const piece of this.piecesById.values()) if (piece.ownerId !== 0) n++;
+    return n;
+  }
+
   get pieceCount() {
     return this.piecesById.size;
   }

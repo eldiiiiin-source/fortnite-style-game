@@ -349,14 +349,17 @@ describe('§8 match tools', () => {
     app.game.grid.add(new BuildPiece({
       type: 'wall', material: 'wood', cell: { cx: 0, cy: 0, cz: 0 }, direction: 'north', ownerId: 1
     }));
-    expect(app.game.grid.pieceCount).toBeGreaterThan(0);
+    expect(app.game.grid.playerPieceCount).toBeGreaterThan(0);
     const stormRadiusBefore = app.game.storm.radius;
     app.game.storm.radius = 12;
 
     expect(app.admin.restartMatch(3).ok).toBe(true);
 
     // §13 - nothing may leak between matches.
-    expect(app.game.grid.pieceCount).toBe(0);
+    // Player-placed pieces only: a fresh match legitimately contains the island's own
+    // structures, which are build pieces by design (MAP_SPEC §20.1).
+    expect(app.game.grid.playerPieceCount).toBe(0);
+    expect(app.game.grid.pieceCount).toBeGreaterThan(0);
     expect(app.game.inventory.itemCount).toBe(0);
     expect(app.game.storm.radius).toBe(stormRadiusBefore);
     expect(app.game.storm.phaseIndex).toBe(-1);
@@ -435,8 +438,12 @@ describe('§10 world and loot tools', () => {
   });
 
   it('clears and repairs builds', () => {
+    // The island's own structures are build pieces (MAP_SPEC §20.1), so a fresh grid is
+    // not empty — but `clearAllBuilds` is a dev tool that means ALL, island included.
+    expect(app.game.grid.pieceCount).toBeGreaterThan(0);
     expect(app.admin.clearAllBuilds().ok).toBe(true);
     expect(app.game.grid.pieceCount).toBe(0);
+    expect(app.game.grid.playerPieceCount).toBe(0);
     expect(app.admin.repairAllBuilds().ok).toBe(true);
   });
 });
@@ -562,7 +569,10 @@ describe('§13/§14 debug and performance', () => {
     const info = app.admin.performanceInfo(governor);
     expect(info.botCount).toBe(app.game.bots.length);
     expect(info.p95Ms).toBeGreaterThan(0);
-    expect(info.buildCount).toBe(0);
+    // Counts the island's structures too: they are build pieces and they cost draw calls,
+    // so a performance readout that excluded them would be lying (MAP_SPEC §20.1).
+    expect(info.buildCount).toBe(app.game.grid.pieceCount);
+    expect(info.buildCount).toBeGreaterThan(0);
   });
 
   it('CANNOT reduce a protected system', () => {
@@ -622,5 +632,23 @@ describe('AdminService construction', () => {
     const service = new AdminService(app);
     expect(service.snapshot()).toHaveProperty('flags');
     expect(service.listLoadouts().length).toBe(Object.keys(TEST_LOADOUTS).length);
+  });
+});
+
+describe('admin input validation', () => {
+  it('refuses a non-numeric material amount instead of writing NaN', () => {
+    startMatch();
+    // A bad argument used to clamp to NaN and poison the player's materials, which then
+    // showed in the HUD and broke every build cost after it.
+    for (const bad of [{ wood: 500 }, 'lots', undefined, NaN, null]) {
+      const result = app.admin.setMaterials(bad);
+      expect(result.ok, String(bad)).toBe(false);
+      expect(result.reason).toBe('invalidAmount');
+    }
+    for (const m of ['wood', 'brick', 'metal']) {
+      expect(Number.isFinite(app.game.player.materials[m]), m).toBe(true);
+    }
+    expect(app.admin.setMaterials(250).ok).toBe(true);
+    expect(app.game.player.materials.wood).toBe(250);
   });
 });

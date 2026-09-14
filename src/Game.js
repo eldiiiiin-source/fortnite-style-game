@@ -23,7 +23,8 @@ import { aimRayFrom, rayAabb } from './player/AimRay.js';
 import { Health } from './combat/Health.js';
 import { Inventory, Weapon } from './combat/Weapon.js';
 import { Pickaxe } from './combat/Pickaxe.js';
-import { TestEnvironment } from './world/TestEnvironment.js';
+import { Island } from './world/Island.js';
+import { resolveStructures } from './world/IslandStructures.js';
 import { WorldLoot } from './loot/WorldLoot.js';
 import { Bot } from './world/Bot.js';
 import { resolvePelletHits, pelletPattern } from './combat/DamageModel.js';
@@ -48,7 +49,7 @@ export class Game {
     this.settings = settings;
     this.time = 0;
 
-    this.terrain = new TestEnvironment();
+    this.terrain = new Island();
     this.grid = new BuildGrid();
     this.collision = new CollisionWorld(this.grid);
 
@@ -140,6 +141,8 @@ export class Game {
       depleted: false
     }));
 
+    this._placeWorldStructures();
+
     const spawnCount = this.botCount > 0 ? this.botCount : layout.botSpawns.length;
     for (let i = 0; i < spawnCount; i++) {
       const base = layout.botSpawns[i % layout.botSpawns.length];
@@ -156,6 +159,37 @@ export class Game {
         spawn,
         rng: this.rng.cosmetic
       }));
+    }
+  }
+
+  /**
+   * Put the island's buildings into the build grid (MAP_SPEC §20.1).
+   *
+   * They are ordinary build pieces, fully built, owned by the world. That is what gives
+   * them collision, destructibility and cover without a second collision path.
+   */
+  _placeWorldStructures() {
+    const descriptors = resolveStructures(this.terrain.pois ?? [], this.terrain);
+    this.worldStructurePieces = 0;
+    for (const d of descriptors) {
+      const piece = new BuildPiece({
+        type: d.type,
+        material: d.material,
+        cell: d.cell,
+        direction: d.direction,
+        ownerId: 0          // the world, not a player
+      });
+      // Pre-built: a world structure must not spend its first seconds ramping up HP.
+      piece.buildProgress = 1;
+      piece.hp = piece.materialDef.fullHp;
+      // A blueprint can overlap itself where two parts of a POI meet; the grid rejects a
+      // duplicate slot by throwing, so a collision is skipped rather than fatal.
+      try {
+        this.grid.add(piece);
+        this.worldStructurePieces++;
+      } catch {
+        // Slot already taken by an earlier piece of the same POI — keep the first.
+      }
     }
   }
 

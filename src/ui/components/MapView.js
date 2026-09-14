@@ -16,6 +16,14 @@ const COLOURS = {
   mid: '#6f8f52',
   high: '#94a06a',
   peak: '#b9b48c',
+  /* Surface colours — MAP_SPEC §20.5. Deliberately the same set the terrain mesh uses,
+     so the map and the world cannot disagree about where the river or the roads are. */
+  surfaceGrass: '#57893f',
+  surfaceField: '#8ba449',
+  surfaceDirt: '#8a7049',
+  surfaceSand: '#c2b98a',
+  surfaceRock: '#87877f',
+  surfaceRoad: '#6a6459',
   safe: 'rgba(255,255,255,0.85)',
   next: 'rgba(69,200,232,0.95)',
   stormFill: 'rgba(150,60,220,0.20)',
@@ -66,8 +74,7 @@ export class MapView {
       for (let i = 0; i < resolution; i++) {
         const x = -half + i * step;
         const z = -half + j * step;
-        const h = this.terrain.heightAt(x, z);
-        const colour = this._heightColour(h);
+        const colour = this._groundColour(x, z);
         const o = (j * resolution + i) * 4;
         image.data[o] = colour[0];
         image.data[o + 1] = colour[1];
@@ -79,10 +86,36 @@ export class MapView {
     this.terrainImage = off;
   }
 
-  _heightColour(h) {
-    const parse = (c) => [
+  /**
+   * Ground colour for a map pixel.
+   *
+   * Prefers the terrain's own surface function where it has one, and shades it by height
+   * so the relief still reads; falls back to pure height banding for a terrain that does
+   * not report surfaces, which keeps the old validation region drawable.
+   */
+  _groundColour(x, z) {
+    const h = this.terrain.heightAt(x, z);
+    if (h < 0) return this._parse(COLOURS.water);
+
+    const surface = this.terrain.surfaceAt?.(x, z);
+    if (!surface) return this._heightColour(h);
+
+    const key = `surface${surface.charAt(0).toUpperCase()}${surface.slice(1)}`;
+    const base = this._parse(COLOURS[key] ?? COLOURS.surfaceGrass);
+    // Height shading on top of the surface hue: without it a large flat POI reads as a
+    // solid block and the relief disappears from the map.
+    const shade = 0.82 + Math.min(1, h / 26) * 0.36;
+    return base.map((c) => Math.max(0, Math.min(255, Math.round(c * shade))));
+  }
+
+  _parse(c) {
+    return [
       parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)
     ];
+  }
+
+  _heightColour(h) {
+    const parse = (c) => this._parse(c);
     if (h < 0) return parse(COLOURS.water);
     if (h < 4) return parse(COLOURS.low);
     if (h < 12) return parse(COLOURS.mid);

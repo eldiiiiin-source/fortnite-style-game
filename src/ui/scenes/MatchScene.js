@@ -16,7 +16,7 @@ import { MapScreen } from '../components/MapScreen.js';
 import { BuildPiece } from '../../building/BuildPiece.js';
 import { solidBoxes, wallBoxes, floorBoxes } from '../../building/PieceGeometry.js';
 import { TILE } from '../../core/Config.js';
-import { TEST_REGION } from '../../world/TestEnvironment.js';
+import { WORLD } from '../../core/Config.js';
 
 export class MatchScene extends Scene {
   constructor(app, ui) {
@@ -33,7 +33,7 @@ export class MatchScene extends Scene {
     this.hud = null;
     this.minimap = null;
     this.mapScreen = null;
-    this.worldExtent = TEST_REGION.halfExtent * 2;
+    this.worldExtent = WORLD.regionExtent;
     this._minimapTick = 0;
   }
 

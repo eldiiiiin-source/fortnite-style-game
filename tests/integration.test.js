@@ -162,7 +162,9 @@ describe('BATTLE_ROYALE_SPEC §20 — match acceptance', () => {
     app.startMatch({ botCount: 3 });
 
     // Fresh everything.
-    expect(app.game.grid.pieceCount).toBe(0);
+    // Player-placed pieces only — the island's own structures are build pieces and are
+    // expected in a fresh match (MAP_SPEC §20.1).
+    expect(app.game.grid.playerPieceCount).toBe(0);
     expect(app.game.inventory.itemCount).toBe(0);
     expect(app.game.storm.phaseIndex).toBe(-1);
     expect(app.game.time).toBe(0);
