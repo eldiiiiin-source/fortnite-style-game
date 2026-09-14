@@ -20,6 +20,7 @@
  */
 import { TILE, WALL_H, MOVEMENT, WORLD } from '../core/Config.js';
 import { smoothstep, clamp } from '../core/MathUtils.js';
+import { resolveDressing, resolveLoot, footprintBounds, originFor } from './IslandStructures.js';
 
 const t = (n) => TILE * n;
 const w = (n) => WALL_H * n;
@@ -155,6 +156,46 @@ export class Island {
     this.regionExtent = WORLD.regionExtent;
     this.halfExtent = WORLD.regionExtent / 2;
     this._layout = null;
+    this._pads = null;
+  }
+
+  /**
+   * Terrain height BEFORE POI levelling — shelf, water carve, roads.
+   *
+   * Exists so a POI's pad can be placed without asking for the height that the pad itself
+   * defines. Water carving and road flattening already ran, which is all the pad placement
+   * needs to know: where the river is, and where the roads went.
+   */
+  _preLevelHeight(x, z) {
+    return this._flattenRoads(x, z, this._carveWater(x, z, this._baseHeight(x, z)));
+  }
+
+  /**
+   * Each POI's flat pad: where its buildings actually settle, and how far they reach.
+   *
+   * Computed once, lazily, against `_preLevelHeight` — never against `heightAt`, which
+   * would recurse straight back into the levelling this is feeding.
+   */
+  get pads() {
+    if (this._pads) return this._pads;
+    const preLevel = {
+      heightAt: (x, z) => this._preLevelHeight(x, z),
+      waterDepthAt: (x, z) => Math.max(0, WORLD.seaLevel - this._preLevelHeight(x, z))
+    };
+    this._pads = POIS.map((poi) => {
+      const { ox, oz } = originFor(poi, preLevel);
+      const bounds = footprintBounds(poi.blueprint);
+      // The pad follows the SETTLED footprint, not the POI marker: Pumpjack Stop's buildings
+      // step 29 m off their marker to get out of the ford, and a pad centred on the marker
+      // would leave them on natural slope again.
+      const raw = this._baseHeight(poi.centre[0], poi.centre[1]);
+      return {
+        centre: [(ox + bounds.cx) * TILE, (oz + bounds.cz) * TILE],
+        core: bounds.radius,
+        height: Math.round(raw / WALL_H) * WALL_H
+      };
+    });
+    return this._pads;
   }
 
   /* ── height ────────────────────────────────────────────────────────────── */
@@ -180,23 +221,45 @@ export class Island {
    * Without this, a building on a slope is buried on its uphill side and stilted on its
    * downhill side, because the build grid is discrete in storeys while the terrain is not.
    * It also gives each POI the flat ground the spec asks for — somewhere to build.
+   *
+   * The flat core must cover the POI's FOOTPRINT, not a fixed fraction of its radius.
+   * Kettle Row is a 13-cell street — 67 m of houses on a 28 m pad — so its far houses stood
+   * on natural slope and sank 7.3 m into the hill, leaving only their roofs above ground.
    */
   _levelPois(x, z, h) {
     // Never level carved water back up. POI levelling ran after the carve, so a POI whose
     // footprint clipped the river quietly filled it in — the river simply stopped.
     if (h < WORLD.seaLevel) return h;
 
-    let out = h;
-    for (const poi of POIS) {
-      const d = Math.hypot(x - poi.centre[0], z - poi.centre[1]);
-      const core = poi.radius * 0.5;
-      const edge = poi.radius * 0.9;
+    // Where two POIs' pads overlap they are averaged by an influence weight, not picked
+    // between. Blending them in sequence is order-dependent and let a neighbour drag this
+    // POI's ground toward its own; picking the nearest outright is order-independent but
+    // DISCONTINUOUS — the winner flips along a line and leaves a one-storey cliff, which cut
+    // the yard spur road in half. The weight diverges as k approaches 1, so inside a POI's
+    // own core its pad still wins outright and its ground stays dead flat.
+    let weight = 0;
+    let weighted = 0;
+    let strongest = 0;
+    for (const pad of this.pads) {
+      const d = Math.hypot(x - pad.centre[0], z - pad.centre[1]);
+      // The apron has to carry the whole drop from pad to natural ground at a walkable
+      // grade. Crown Post's pad stands 11.5 m above the countryside, and a short apron put
+      // the spine road onto a 59° ramp — past MOVEMENT.maxWalkableSlopeDeg, so the road
+      // simply stopped being a road.
+      const edge = pad.core * 3.0;
       if (d >= edge) continue;
-      const pad = this._baseHeight(poi.centre[0], poi.centre[1]);
-      const k = smoothstep(edge, core, d);
-      out = out * (1 - k) + pad * k;
+
+      const k = smoothstep(edge, pad.core, d);
+      if (k >= 1) return pad.height;
+
+      const w = (k * k) / (1 - k);
+      weight += w;
+      weighted += w * pad.height;
+      strongest = Math.max(strongest, k);
     }
-    return out;
+    if (weight === 0) return h;
+
+    return h * (1 - strongest) + (weighted / weight) * strongest;
   }
 
   _baseHeight(x, z) {
@@ -581,25 +644,12 @@ function buildLayout(island) {
     });
   }
 
-  // Loot rings a POI rather than sitting at its centre, so landing somewhere interesting
-  // means moving through it (§14).
-  const chests = [];
-  const ammoBoxes = [];
-  const floorLoot = [];
-  POIS.forEach((poi, i) => {
-    const [cx, cz] = poi.centre;
-    const r = poi.radius * 0.55;
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2 + i;
-      chests.push({ x: cx + Math.cos(a) * r, z: cz + Math.sin(a) * r });
-    }
-    ammoBoxes.push({ x: cx - t(3), z: cz + t(3) });
-    ammoBoxes.push({ x: cx + t(3), z: cz + t(2) });
-    for (let k = 0; k < 4; k++) {
-      const a = (k / 4) * Math.PI * 2 + i * 0.7;
-      floorLoot.push({ x: cx + Math.cos(a) * r * 1.4, z: cz + Math.sin(a) * r * 1.4 });
-    }
-  });
+  // Loot is AUTHORED per POI (§21.5), not scattered in a ring: a loot route is only a
+  // route if the pieces are in rooms and on floors a player has to choose between.
+  const { chests, ammoBoxes, floorLoot } = resolveLoot(POIS, island);
+
+  // Prop dressing — visual only (§21.6).
+  const dressing = resolveDressing(POIS, island);
 
   // Bots start spread around the island, on dry walkable ground.
   const botSpawns = [];
@@ -616,6 +666,7 @@ function buildLayout(island) {
     chests,
     ammoBoxes,
     floorLoot,
+    dressing,
     props,
     botSpawns,
     trees,

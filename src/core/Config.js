@@ -382,9 +382,30 @@ export const BIND_CONFLICT_EXEMPT = Object.freeze([
   ['fire', 'confirmEdit']
 ]);
 
+/* ══ LIGHTING — MAP_SPEC §20.8, §21.9 ════════════════════════════════════════ */
+
+export const LIGHTING = Object.freeze({
+  // §20.8 — a warm low-angle key. This is the only light that casts shadows.
+  sunIntensity: 2.35,
+  sunElevationDeg: 55,
+
+  // §20.8 — cool sky over warm ground, shaded by surface normal.
+  hemisphereIntensity: 0.8,
+
+  // §21.9 — a flat floor under shadowed and interior surfaces, so an enclosed room reads
+  // as a dim room rather than a black void. A fill, not a second key: §21.8.11 holds it
+  // well below the sun so exteriors keep their directional shading and cast shadows.
+  interiorFill: 0.55
+});
+
 /* ══ WORLD — MAP_SPEC ════════════════════════════════════════════════════════ */
 
 export const WORLD = Object.freeze({
+  // MAP_SPEC §21.2 — how far, in build cells, a POI's buildings may be settled from the
+  // POI's own centre to find dry ground. The POI marker never moves; only its blueprint
+  // does. Large enough to step a footprint off a river, small enough that a POI cannot
+  // wander out of the place the map put it.
+  poiSettleReach: 6,
   regionExtent: 1024,          // MAP_SPEC §12.2 — the first region only
   eventualIslandExtent: 2048,
   seaLevel: 0,

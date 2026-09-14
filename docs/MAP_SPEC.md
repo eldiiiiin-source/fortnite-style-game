@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.1.0 |
+| Version | 1.3.0 |
 | Supersedes | Baseline v0.1.0 ("Cinder Isle") — void |
 | Companion | `docs/MASTER_SPEC.md`, `references/map/` |
 
@@ -394,6 +394,144 @@ the subject.
 8. The spawn point and every bot spawn is on dry walkable land.
 9. Loot, props and bot spawns stay inside the island bounds.
 
+## 21. POI architecture, interiors and detail [OWNER, 2026-09-14]
+
+**[OWNER] direction:** make the six existing POIs feel like real, memorable locations
+rather than shells. **The macro world layout is frozen** — terrain, river, lake, roads,
+minimap surface logic and island architecture are not to be redesigned. This section
+governs buildings, interiors, loot, props and POI identity only.
+
+### 21.1 Silhouette identity
+
+From medium distance each POI must be distinguishable without the map:
+
+| POI | Silhouette |
+| --- | --- |
+| Hollow Farm | Long barn beside a tall capped silo |
+| Pumpjack Stop | Flat-roofed station under a wide forecourt canopy |
+| Kettle Row | A run of pitched roofs at different heights |
+| Riverwatch | A stilted cabin with a dock reaching over the water |
+| Crown Post | A four-storey tower on the skyline |
+| Dray Yard | Wide flat warehouses with container stacks |
+
+### 21.2 Architecture comes from the edit system
+
+A doorway is **not** a missing wall. It is a wall carrying the edit pattern `4,7`; a window
+is one carrying `3,5`; a counter or a fence rail is `0,1,2,3,4,5`.
+
+This matters beyond looks: `PieceGeometry` derives the mesh **and** the collider from the
+same pattern, so a framed opening is automatically walkable and a window automatically
+blocks the body but not the sightline. Building façades this way added no collision code.
+
+Openings in use: door `4,7`, arch `1,4,7`, door-with-window `3,4,7`, window `4`, paired
+windows `3,5`, clerestory `1`, half wall `0,1,2,3,4,5`, open top `0,1,2`.
+
+### 21.2.1 Buildings settle on flat, storey-aligned ground [OWNER-derived]
+
+The build grid is discrete in storeys; the terrain is not. A POI founded on one height
+sample therefore stands partly in its own ground. Kettle Row is a 67 m street whose centre
+sat on level ground while its far houses stood **7.3 m into the hill** — an entire ground
+floor underground, only the roofs showing.
+
+Three rules, together, make a POI buildable:
+
+1. **The pad covers the footprint.** The flat core is sized and centred on the blueprint's
+   own footprint, not on a fraction of the POI radius. It is measured from the footprint's
+   CENTRE and per axis — a blueprint's origin is a corner, so a radius taken from it is
+   twice what the buildings need, and pads that large overlap their neighbours.
+2. **The pad lands on a storey line.** Snapped to a multiple of `WALL_H`, so a building's
+   base storey coincides with its ground exactly rather than up to a storey below it.
+3. **The pad's apron stays walkable.** The blend from pad to natural ground carries the
+   whole drop at under `MOVEMENT.maxWalkableSlopeDeg`; a short apron turned the spine road
+   onto a 54° ramp and it stopped being a road.
+
+Where two pads overlap they are averaged by an influence weight that diverges at the core,
+so each POI's own ground stays dead flat while the ground between them stays continuous.
+Picking the nearer pad outright is discontinuous and leaves a one-storey cliff.
+
+A POI whose footprint lands in water is **settled**: its marker stays exactly where the map
+puts it and its buildings step to the nearest dry origin within `WORLD.poiSettleReach`. A
+`waterside` POI is exempt — it is meant to stand over water — but is founded on the median
+of its DRY cells, so a stilted cabin sits on its bank with the dock reaching out over the
+channel, rather than 10.9 m below the bank it belongs to.
+
+### 21.3 Roofs
+
+Cones are banned as the primary roof form — one per cell gives a field of spikes.
+
+- **Pitched roof:** ramp rows at the eaves with a flat deck spanning the ridge. One storey
+  of rise across the whole roof, and the deck is standable.
+- **Flat industrial roof:** a slab with a half-wall parapet to fight from behind.
+
+The ramp direction is the easy thing to get backwards: a ramp is HIGH at the edge it faces,
+so the near eave faces `south` and the far eave `north` for the ridge to land in the middle.
+
+### 21.4 Interiors
+
+Every major building has a clear entrance, a second route where the shape allows, windows,
+stairs where it is multi-storey, and room to fight in third person.
+
+**Combat readability outranks realism.** One cell is 5.12 m, so rooms are generous by
+design; a realistically-scaled hallway is unplayable over the shoulder.
+
+### 21.5 Loot routes
+
+Loot is authored per POI, never scattered in a ring. Each POI has multiple chests across
+different rooms and floors, ammo and floor loot spread away from them, and exactly one
+`risk` chest: the best position in the most exposed place — a hay loft, a dock head, a
+tower deck, a warehouse roof.
+
+Loot carries its own storey, so an upper-floor chest lands on that floor.
+
+### 21.6 Prop dressing
+
+Props are **visual only**. Anything a player must be able to take cover behind is a build
+piece; a prop that looks like cover but is not is worse than no prop. Props stay low and
+sparse so they never fight movement or building.
+
+Rendered as one InstancedMesh per kind with a shared material, so the whole dressing layer
+costs about a dozen draw calls.
+
+### 21.7 Environmental storytelling
+
+One readable idea per place, carried by the props: the farm is still worked, the service
+stop is recently abandoned, the cabin is fished from, the yard still moves goods, the
+outpost watches the island.
+
+### 21.8 Required tests
+
+1. Every POI's buildings are build pieces in the grid, with valid types and materials.
+2. Every building sits on the ground: nothing floats, nothing is buried.
+3. Every POI has a walkable entrance — at least one opening pattern marked walkable.
+4. Every multi-storey building has a ramp connecting its storeys.
+5. No POI is roofed over so completely that its interior is unreachable.
+6. Loot is spread: no POI has all its chests in one cell, and each has a `risk` chest.
+7. Every chest, ammo box and floor-loot position is inside its POI and above its ground.
+8. Props stay inside their POI and out of the water. They may stand on road surface
+   inside a POI — a service station's pumps belong on its forecourt.
+9. Piece counts stay inside the build budget.
+10. Each POI is distinguishable by piece-type mix — no two share a silhouette recipe.
+11. Interior lighting keeps its fill below the key light, so §21.9's floor cannot be raised
+    into a second key that flattens exterior shading.
+12. Every building cell — not just the POI centre — sits within one wall edit row of its
+    ground, and each POI's pad is flat across its whole footprint and on a storey line.
+13. Openings reach the geometry: a patterned wall renders fewer solid tiles than a full one,
+    and a half wall stands one edit row high.
+
+### 21.9 Interior lighting [OWNER-derived]
+
+An enclosed room lit only by a key light and a sky-normal hemisphere term goes black: the
+inward-facing surfaces take the ground ambient, and the roof shadows everything beneath it.
+That contradicts §21.4 — a room you cannot read is not a room you can fight in.
+
+- A flat ambient term sets a **floor on shadowed and interior surfaces** so an interior
+  reads as a dim room rather than a black void.
+- The floor is a fill, not a second key: exteriors must keep their directional shading and
+  visible cast shadows, and interiors must stay clearly darker than open ground so stepping
+  inside still reads as cover.
+- Lighting intensities are tunables and live in `Config.js` under `LIGHTING`, not as
+  literals in the renderer.
+
 ## 19. Final standard [OWNER]
 
 > "An original bright, peaceful, readable battle royale island with strong early Chapter 2
@@ -412,6 +550,9 @@ stronger landmarks, better performance.**
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.3.0 | 2026-09-14 | Adds §21.2.1: POI pads are sized to the blueprint footprint, snapped to a storey line, and aproned at a walkable grade; overlapping pads blend by influence weight; a POI whose footprint lands in water settles onto dry ground while its marker stays put. Fixes buildings standing up to 7.3 m inside their own ground. |
+| 1.2.1 | 2026-09-14 | Adds §21.9 interior lighting: a flat ambient floor so enclosed rooms are readable per §21.4, with lighting intensities moved into `Config.LIGHTING`. |
+| 1.2.0 | 2026-09-14 | [OWNER] POI architecture, interiors and detail pass (§21): openings via the edit system, ramp-based roofs, interiors with stairs and second routes, authored per-POI loot routes with a risk chest, visual prop dressing, and silhouette identity. Macro layout frozen. |
 | 1.1.0 | 2026-09-14 | [OWNER] First playable island visual overhaul (§20): hand-authored terrain form, river and lake carved below sea level, road network, surface types, authored vegetation clusters, six original POIs, and the decision that POI structures are build pieces so no new collision path is added. |
 | 1.0.0 | 2026-09-13 | Replaced the "Cinder Isle" baseline with the owner's authoritative map specification. Voids: the 190 m central massif, the high-frequency detail noise layer, uniform vegetation scatter, the 15 invented POIs, and the absence of any water system. Adds the reference-image category rules, the connected water network, countryside-first philosophy, and architecture derived from the build module. |
 | 0.1.0 | 2026-09-13 | Initial baseline placeholder. Void. |

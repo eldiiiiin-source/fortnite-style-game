@@ -128,7 +128,13 @@ export class Game {
   /** Build the validation region's contents (§22). */
   _populateRegion() {
     const layout = this.terrain.layout();
-    const at = (p) => ({ x: p.x, y: this.terrain.heightAt(p.x, p.z), z: p.z });
+    // Authored loot carries its own height so an upper-storey chest lands on that floor
+    // rather than on the ground beneath the building (MAP_SPEC §21.5).
+    const at = (p) => ({
+      x: p.x,
+      y: p.y !== undefined ? p.y : this.terrain.heightAt(p.x, p.z),
+      z: p.z
+    });
 
     for (const p of layout.chests) this.worldLoot.addContainer(at(p), 'chest');
     for (const p of layout.ammoBoxes) this.worldLoot.addContainer(at(p), 'ammoBox');
@@ -179,6 +185,9 @@ export class Game {
         direction: d.direction,
         ownerId: 0          // the world, not a player
       });
+      // Doors, windows and half-height fences are edit patterns on ordinary walls, so the
+      // pattern has to ride along with the piece — without it every opening is sealed.
+      piece.editPattern = d.editPattern;
       // Pre-built: a world structure must not spend its first seconds ramping up HP.
       piece.buildProgress = 1;
       piece.hp = piece.materialDef.fullHp;

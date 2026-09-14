@@ -11,7 +11,7 @@
  */
 import * as THREE from 'three';
 import {
-  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA
+  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA, LIGHTING
 } from '../core/Config.js';
 import { solidBoxes, rampSections, coneQuadrants, cellOrigin } from '../building/PieceGeometry.js';
 import { CharacterView } from './CharacterView.js';
@@ -58,6 +58,27 @@ const FLORA = Object.freeze({
   bush: 0x559442
 });
 
+/**
+ * Prop dressing colours (MAP_SPEC §21.6). One shared material per kind, one InstancedMesh
+ * per kind — the whole dressing layer costs a dozen draw calls, not one per crate.
+ */
+const PROPS = Object.freeze({
+  crate: 0x9a7746,
+  barrel: 0x4f7a5c,
+  pallet: 0x8a6b42,
+  hayBale: 0xc9b45c,
+  bench: 0x7d6242,
+  sign: 0xbfc6cc,
+  fuelPump: 0xcf5b45,
+  toolRack: 0x6b6f78,
+  fishingRack: 0x7f6a4c,
+  antenna: 0xa7aeb6,
+  sandbag: 0xa9976b,
+  barrier: 0xd8863a,
+  trough: 0x6f6a5c,
+  forklift: 0xd2a32e
+});
+
 export class Renderer {
   constructor(container, terrain) {
     this.terrain = terrain;
@@ -94,10 +115,10 @@ export class Renderer {
     return this.renderer.domElement;
   }
 
-  /** MAP_SPEC §10 — soft sunlight, readable shadows, clear silhouettes. */
+  /** MAP_SPEC §10, §20.8, §21.9 — soft sunlight, readable shadows, readable interiors. */
   _setupLighting() {
-    const sun = new THREE.DirectionalLight(PALETTE.sun, 2.35);
-    const elevation = 55 * Math.PI / 180;
+    const sun = new THREE.DirectionalLight(PALETTE.sun, LIGHTING.sunIntensity);
+    const elevation = LIGHTING.sunElevationDeg * Math.PI / 180;
     sun.position.set(Math.cos(elevation) * 200, Math.sin(elevation) * 200, 90);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -107,7 +128,16 @@ export class Renderer {
     this.scene.add(sun.target);
     this.sun = sun;
 
-    this.scene.add(new THREE.HemisphereLight(PALETTE.ambientSky, PALETTE.ambientGround, 0.8));
+    this.scene.add(
+      new THREE.HemisphereLight(PALETTE.ambientSky, PALETTE.ambientGround, LIGHTING.hemisphereIntensity)
+    );
+
+    // §21.9 — the hemisphere term shades by normal, so a wall facing into a room takes the
+    // dark ground colour and the roof shadows the rest. A flat ambient is what stops an
+    // interior reading as a black void; it is deliberately far below the sun so open ground
+    // still shows directional shading.
+    this.scene.add(new THREE.AmbientLight(PALETTE.ambientSky, LIGHTING.interiorFill));
+
     this._setupSky();
   }
 
@@ -251,6 +281,8 @@ export class Renderer {
       );
     }
 
+    this._setupDressing(layout, addInstances, ground);
+
     const bushes = layout.bushes ?? [];
     addInstances(
       new THREE.SphereGeometry(TILE * 0.16, 7, 5), FLORA.bush, bushes,
@@ -320,6 +352,57 @@ export class Renderer {
         mesh.geometry.dispose();
         this.chunkMeshes.delete(key);
       }
+    }
+  }
+
+  /**
+   * Prop dressing (MAP_SPEC §21.6) — crates, barrels, pumps, signs and the rest.
+   *
+   * VISUAL ONLY, and deliberately so: anything a player must take cover behind is a build
+   * piece in the blueprint. A prop that looks like cover but is not is worse than no prop,
+   * so these are kept low and small enough that nobody reads them as protection.
+   */
+  _setupDressing(layout, addInstances, ground) {
+    const dressing = layout.dressing ?? [];
+    if (dressing.length === 0) return;
+
+    const u = TILE;
+    const SHAPES = {
+      crate: () => new THREE.BoxGeometry(u * 0.17, u * 0.17, u * 0.17),
+      barrel: () => new THREE.CylinderGeometry(u * 0.08, u * 0.08, u * 0.2, 9),
+      pallet: () => new THREE.BoxGeometry(u * 0.24, u * 0.04, u * 0.24),
+      hayBale: () => new THREE.CylinderGeometry(u * 0.13, u * 0.13, u * 0.22, 9),
+      bench: () => new THREE.BoxGeometry(u * 0.3, u * 0.06, u * 0.1),
+      sign: () => new THREE.BoxGeometry(u * 0.26, u * 0.34, u * 0.03),
+      fuelPump: () => new THREE.BoxGeometry(u * 0.12, u * 0.34, u * 0.14),
+      toolRack: () => new THREE.BoxGeometry(u * 0.26, u * 0.26, u * 0.05),
+      fishingRack: () => new THREE.BoxGeometry(u * 0.06, u * 0.3, u * 0.26),
+      antenna: () => new THREE.CylinderGeometry(u * 0.015, u * 0.025, u * 0.7, 6),
+      sandbag: () => new THREE.BoxGeometry(u * 0.22, u * 0.08, u * 0.14),
+      barrier: () => new THREE.BoxGeometry(u * 0.3, u * 0.12, u * 0.05),
+      trough: () => new THREE.BoxGeometry(u * 0.34, u * 0.08, u * 0.12),
+      forklift: () => new THREE.BoxGeometry(u * 0.2, u * 0.22, u * 0.32)
+    };
+    // Lift each kind by half its own height so it rests on the ground rather than in it.
+    const LIFT = {
+      crate: 0.085, barrel: 0.1, pallet: 0.02, hayBale: 0.11, bench: 0.03,
+      sign: 0.17, fuelPump: 0.17, toolRack: 0.13, fishingRack: 0.15,
+      antenna: 0.35, sandbag: 0.04, barrier: 0.06, trough: 0.04, forklift: 0.11
+    };
+
+    const byKind = new Map();
+    for (const prop of dressing) {
+      if (!SHAPES[prop.kind]) continue;
+      if (!byKind.has(prop.kind)) byKind.set(prop.kind, []);
+      byKind.get(prop.kind).push(prop);
+    }
+
+    for (const [kind, entries] of byKind) {
+      addInstances(SHAPES[kind](), PROPS[kind] ?? 0x9a9a94, entries, (d, prop) => {
+        d.position.set(prop.x, ground(prop.x, prop.z) + u * (LIFT[kind] ?? 0.1), prop.z);
+        d.rotation.set(0, prop.yaw, 0);
+        d.scale.setScalar(1);
+      });
     }
   }
 

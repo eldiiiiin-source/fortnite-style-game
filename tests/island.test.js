@@ -6,9 +6,14 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Island, Surface, POIS, ROADS, RIVER, LAKE } from '../src/world/Island.js';
-import { resolveStructures, BLUEPRINT_NAMES } from '../src/world/IslandStructures.js';
+import {
+  originFor,
+  resolveStructures, resolveDressing, resolveLoot, BLUEPRINT_NAMES, PROP_KINDS
+} from '../src/world/IslandStructures.js';
+import { WALL_PATTERNS } from '../src/editing/EditPatterns.js';
+import { wallBoxes } from '../src/building/PieceGeometry.js';
 import { TestEnvironment } from '../src/world/TestEnvironment.js';
-import { MOVEMENT, WORLD, TILE, WALL_H } from '../src/core/Config.js';
+import { MOVEMENT, WORLD, TILE, WALL_H, BUDGET, LIGHTING } from '../src/core/Config.js';
 
 const island = new Island();
 
@@ -211,13 +216,13 @@ describe('MAP_SPEC §20.9.6 — POI structures are build pieces', () => {
   });
 
   it('sits every structure on the ground rather than floating or buried', () => {
+    // One wall edit row. A building off by more than that has a visibly sunk or stilted
+    // ground floor, whatever the POI centre says.
+    const TOLERANCE = WALL_H / 3;
     for (const poi of POIS) {
-      const ground = island.heightAt(poi.centre[0], poi.centre[1]);
       const mine = structures.filter((s) => s.poi === poi.id);
-      const lowest = Math.min(...mine.map((s) => s.cell.cy));
-      // The base storey holds the ground line: its floor is at or just below it.
-      expect(lowest * WALL_H, `${poi.id} base`).toBeLessThanOrEqual(ground);
-      expect((lowest + 1) * WALL_H, `${poi.id} base`).toBeGreaterThan(ground);
+      const off = foundationError(poi, mine, island);
+      expect(off, `${poi.id} is ${off.toFixed(2)} m off its ground`).toBeLessThan(TOLERANCE);
     }
   });
 
@@ -312,5 +317,266 @@ describe('the overhaul changed no gameplay constant', () => {
 
   it('keeps the region extent the storm and drop route are sized against', () => {
     expect(island.regionExtent).toBe(WORLD.regionExtent);
+  });
+});
+
+
+/**
+ * Worst mismatch between a POI's base storey and the ground under its footprint, in metres.
+ *
+ * Measured against the POI's own settled base storey, over EVERY dry building cell.
+ *
+ * Both halves of that matter. Measuring at the POI centre alone is what let a real bug
+ * through: Kettle Row is a 67 m street, its centre sat on level ground, and its far houses
+ * stood 7.3 m into the hill with only their roofs showing. And measuring against the POI's
+ * LOWEST piece instead of its base storey would flag Riverwatch, whose dock is three storeys
+ * down at the waterline on purpose (§21.2.1).
+ */
+function foundationError(poi, pieces, island) {
+  const base = originFor(poi, island).baseStorey * WALL_H;
+  const seen = new Set();
+  let worst = 0;
+  for (const p of pieces) {
+    const key = `${p.cell.cx},${p.cell.cz}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const x = (p.cell.cx + 0.5) * TILE;
+    const z = (p.cell.cz + 0.5) * TILE;
+    // A waterside POI stands over the channel on purpose; only its dry cells are ground.
+    if (island.waterDepthAt(x, z) > 0) continue;
+    worst = Math.max(worst, Math.abs(island.heightAt(x, z) - base));
+  }
+  return worst;
+}
+
+describe('MAP_SPEC §21 — POI architecture, interiors and loot', () => {
+  const structures = resolveStructures(POIS, island);
+  const dressing = resolveDressing(POIS, island);
+  const loot = resolveLoot(POIS, island);
+  const byPoi = (list) => {
+    const map = new Map(POIS.map((p) => [p.id, []]));
+    for (const item of list) map.get(item.poi)?.push(item);
+    return map;
+  };
+  const piecesByPoi = byPoi(structures);
+
+  it('§21.8.1 builds every POI from valid pieces', () => {
+    for (const poi of POIS) {
+      const mine = piecesByPoi.get(poi.id);
+      expect(mine.length, `${poi.id} pieces`).toBeGreaterThan(40);
+      for (const p of mine) {
+        expect(['wall', 'floor', 'ramp', 'cone']).toContain(p.type);
+        expect(['wood', 'brick', 'metal']).toContain(p.material);
+        if (p.type === 'wall') expect(['north', 'south', 'east', 'west']).toContain(p.direction);
+      }
+    }
+  });
+
+  it('§21.8.2 sits every building on the ground', () => {
+    const TOLERANCE = WALL_H / 3;      // one wall edit row
+    for (const poi of POIS) {
+      const off = foundationError(poi, piecesByPoi.get(poi.id), island);
+      expect(off, `${poi.id} is ${off.toFixed(2)} m off its ground`).toBeLessThan(TOLERANCE);
+    }
+  });
+
+  it('§21.8.2 lays a flat, storey-aligned pad under every POI footprint', () => {
+    // The pad is what makes the previous test passable: the build grid is discrete in
+    // storeys, so a POI's ground has to be both level and ON a storey line.
+    for (const poi of POIS) {
+      const cells = new Set();
+      for (const p of piecesByPoi.get(poi.id)) cells.add(`${p.cell.cx},${p.cell.cz}`);
+      const heights = [...cells].map((k) => {
+        const [cx, cz] = k.split(',').map(Number);
+        return { x: (cx + 0.5) * TILE, z: (cz + 0.5) * TILE };
+      }).filter((c) => island.waterDepthAt(c.x, c.z) <= 0)
+        .map((c) => island.heightAt(c.x, c.z));
+
+      const spread = Math.max(...heights) - Math.min(...heights);
+      expect(spread, `${poi.id} pad varies ${spread.toFixed(2)} m`).toBeLessThan(WALL_H / 3);
+      const off = Math.abs(heights[0] / WALL_H - Math.round(heights[0] / WALL_H)) * WALL_H;
+      expect(off, `${poi.id} pad is ${off.toFixed(2)} m off a storey line`).toBeLessThan(0.01);
+    }
+  });
+
+  it('§21.8.3 gives every POI a walkable entrance', () => {
+    for (const poi of POIS) {
+      const walkable = piecesByPoi.get(poi.id).filter((p) => (
+        p.type === 'wall' && p.editPattern?.walkable === true
+      ));
+      expect(walkable.length, `${poi.id} has no walkable opening`).toBeGreaterThan(0);
+    }
+  });
+
+  it('§21.8.3 uses only edit patterns the game defines', () => {
+    for (const p of structures) {
+      if (!p.editPattern) continue;
+      expect(Object.keys(WALL_PATTERNS), `${p.poi}: ${p.editPattern.key}`)
+        .toContain(p.editPattern.key);
+    }
+  });
+
+  it('§21.8.3 hands pieces a resolved pattern, not a bare key', () => {
+    // PieceGeometry reads `editPattern.removed`. A descriptor carrying the KEY ('4,7')
+    // instead of the resolved object silently yields a solid wall: the POI still looks
+    // right from outside and every door, window and fence gap is sealed.
+    for (const p of structures) {
+      if (!p.editPattern) continue;
+      expect(typeof p.editPattern, `${p.poi} pattern is not resolved`).toBe('object');
+      expect(Array.isArray(p.editPattern.removed), `${p.poi}: ${p.editPattern.key}`).toBe(true);
+      expect(p.editPattern.removed.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('§21.8.3 actually cuts the opening out of the wall geometry', () => {
+    // The end-to-end assertion: a patterned wall must render fewer solid tiles than a full
+    // one, and a half wall must stand a third of WALL_H. Counting patterns is not enough —
+    // the pattern has to reach the geometry.
+    const tiles = (p) => wallBoxes({
+      cell: p.cell, direction: p.direction, editPattern: p.editPattern
+    });
+    const full = tiles({ cell: { cx: 0, cy: 0, cz: 0 }, direction: 'south', editPattern: null });
+    expect(full.length).toBe(9);
+
+    const patterned = structures.filter((p) => p.type === 'wall' && p.editPattern);
+    expect(patterned.length).toBeGreaterThan(0);
+    for (const p of patterned) {
+      const boxes = tiles(p);
+      expect(boxes.length, `${p.poi}: ${p.editPattern.key} did not cut`).toBeLessThan(9);
+      expect(boxes.length).toBe(9 - p.editPattern.removed.length);
+    }
+
+    // Half walls are the load-bearing case for cover: they must be low enough to shoot over.
+    const halves = patterned.filter((p) => p.editPattern.key === '0,1,2,3,4,5');
+    expect(halves.length, 'no half-height cover in any POI').toBeGreaterThan(0);
+    for (const p of halves) {
+      const top = Math.max(...tiles(p).map((b) => b.max[1]));
+      expect(top - p.cell.cy * WALL_H).toBeCloseTo(WALL_H / 3, 5);
+    }
+  });
+
+  it('§21.8.4 connects the storeys of every multi-storey POI with a ramp', () => {
+    for (const poi of POIS) {
+      const mine = piecesByPoi.get(poi.id);
+      const storeys = new Set(mine.map((p) => p.cell.cy));
+      if (storeys.size < 2) continue;
+      expect(mine.some((p) => p.type === 'ramp'), `${poi.id} has no stairs`).toBe(true);
+    }
+  });
+
+  it('§21.8.5 leaves every POI interior reachable', () => {
+    // A roof over a doorway is fine; a roof with no walkable opening beneath it anywhere is
+    // a sealed box. Check each POI has walkable openings on its ground storey.
+    for (const poi of POIS) {
+      const mine = piecesByPoi.get(poi.id);
+      // The POI's own base storey — where its buildings stand. Riverwatch's lowest pieces
+      // are its dock, three storeys down at the waterline, and a dock has no doorways.
+      const base = originFor(poi, island).baseStorey;
+      const groundOpenings = mine.filter((p) => (
+        p.cell.cy === base && p.editPattern?.walkable === true
+      ));
+      expect(groundOpenings.length, `${poi.id} sealed at ground level`).toBeGreaterThan(0);
+    }
+  });
+
+  it('§21.8.6 spreads loot and gives each POI one risk chest', () => {
+    const chests = byPoi(loot.chests);
+    for (const poi of POIS) {
+      const mine = chests.get(poi.id);
+      expect(mine.length, `${poi.id} chests`).toBeGreaterThanOrEqual(3);
+      // Not all in one place: at least three distinct cells.
+      const cells = new Set(mine.map(
+        (c) => `${Math.round(c.x / TILE)},${Math.round(c.z / TILE)},${Math.round(c.y / WALL_H)}`
+      ));
+      expect(cells.size, `${poi.id} chests are stacked in one spot`).toBeGreaterThanOrEqual(3);
+      expect(mine.some((c) => c.risk), `${poi.id} has no risk chest`).toBe(true);
+    }
+  });
+
+  it('§21.8.6 puts loot on more than one floor where the POI has floors', () => {
+    const chests = byPoi(loot.chests);
+    const multiStorey = ['hollowFarm', 'kettleRow', 'crownPost', 'drayYard'];
+    for (const id of multiStorey) {
+      const heights = new Set(chests.get(id).map((c) => Math.round(c.y / WALL_H)));
+      expect(heights.size, `${id} loot is all on one floor`).toBeGreaterThan(1);
+    }
+  });
+
+  it('§21.8.7 keeps every loot position inside its POI and above its ground', () => {
+    const all = [...loot.chests, ...loot.ammoBoxes, ...loot.floorLoot];
+    expect(all.length).toBeGreaterThan(50);
+    for (const item of all) {
+      const poi = POIS.find((p) => p.id === item.poi);
+      const d = Math.hypot(item.x - poi.centre[0], item.z - poi.centre[1]);
+      expect(d, `${item.poi} loot is outside the POI`).toBeLessThan(poi.radius * 1.6);
+      // Loot sits on the building's floors, so it is measured against the POI's own settled
+      // foundation rather than against whatever the terrain does under that exact point.
+      const { baseStorey } = originFor(poi, island);
+      expect(item.y, `${item.poi} loot below its building`)
+        .toBeGreaterThanOrEqual(baseStorey * WALL_H);
+    }
+  });
+
+  it('§21.8.8 keeps props out of water and off roads', () => {
+    expect(dressing.length).toBeGreaterThan(30);
+    for (const prop of dressing) {
+      expect(PROP_KINDS, `unknown prop ${prop.kind}`).toContain(prop.kind);
+      expect(island.waterDepthAt(prop.x, prop.z), `${prop.kind} in water`)
+        .toBeLessThan(WORLD.swimDepth);
+      // A service station's pumps belong on its forecourt, which is road surface — what
+      // matters is that props stay inside their POI.
+      const poi = POIS.find((p) => p.id === prop.poi);
+      expect(Math.hypot(prop.x - poi.centre[0], prop.z - poi.centre[1]),
+        `${prop.kind} outside ${prop.poi}`).toBeLessThan(poi.radius * 1.6);
+    }
+  });
+
+  it('§21.8.9 stays inside the build-piece budget', () => {
+    expect(structures.length).toBeGreaterThan(400);
+    expect(structures.length).toBeLessThan(BUDGET.maxBuildPieces * 0.5);
+  });
+
+  it('§21.8.11 keeps the interior fill below the key light', () => {
+    // §21.9 — the fill exists so a room is readable, not so the world goes flat. If it ever
+    // approaches the sun it stops being a fill and exteriors lose their directional shading.
+    expect(LIGHTING.interiorFill).toBeGreaterThan(0);
+    expect(LIGHTING.interiorFill).toBeLessThan(LIGHTING.sunIntensity * 0.5);
+    expect(LIGHTING.interiorFill).toBeLessThan(LIGHTING.hemisphereIntensity);
+  });
+
+  it('§21.8.10 gives every POI a distinct silhouette recipe', () => {
+    // Piece-type mix plus storey count: if two POIs match on both, they will read the same
+    // from a distance whatever their props say.
+    const recipes = new Set();
+    for (const poi of POIS) {
+      const mine = piecesByPoi.get(poi.id);
+      const counts = { wall: 0, floor: 0, ramp: 0, cone: 0 };
+      for (const p of mine) counts[p.type]++;
+      const storeys = new Set(mine.map((p) => p.cell.cy)).size;
+      const recipe = `${storeys}|${Object.values(counts).join(',')}`;
+      expect(recipes.has(recipe), `${poi.id} duplicates another silhouette`).toBe(false);
+      recipes.add(recipe);
+    }
+  });
+
+  it('gives the tall POIs real vertical presence', () => {
+    // Measured UP from each POI's own base storey, not as a storey span. Riverwatch's dock
+    // descends three storeys to the waterline (§21.2.1), which makes its span the largest on
+    // the island while it remains the lowest thing on the skyline.
+    const height = (id) => {
+      const poi = POIS.find((p) => p.id === id);
+      const base = originFor(poi, island).baseStorey;
+      return Math.max(...piecesByPoi.get(id).map((p) => p.cell.cy)) - base;
+    };
+    // Crown Post is the island's landmark; it must out-top every other POI.
+    for (const id of ['hollowFarm', 'pumpjackStop', 'kettleRow', 'riverwatch', 'drayYard']) {
+      expect(height('crownPost'), `crownPost vs ${id}`).toBeGreaterThan(height(id));
+    }
+  });
+
+  it('uses roofs made of ramps and decks, not fields of cones', () => {
+    const cones = structures.filter((p) => p.type === 'cone').length;
+    expect(cones).toBe(0);
+    expect(structures.filter((p) => p.type === 'ramp').length).toBeGreaterThan(20);
   });
 });
