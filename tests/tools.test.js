@@ -16,7 +16,7 @@ import { Pickaxe } from '../src/combat/Pickaxe.js';
 import { buildCharacterRig } from '../src/cosmetics/CharacterRig.js';
 import { SKINS } from '../src/cosmetics/SkinDefinitions.js';
 import { rigBounds, partColour } from '../src/cosmetics/RigPrimitives.js';
-import { PICKAXE, PICKAXE_VIEW, CHARACTER, RARITY_ORDER } from '../src/core/Config.js';
+import { PICKAXE, PICKAXE_VIEW, CHARACTER, CAMERA, RARITY_ORDER } from '../src/core/Config.js';
 import {
   cosmeticsByCategory, CosmeticCategory, getCosmetic, catalogCounts
 } from '../src/meta/CosmeticCatalog.js';
@@ -370,7 +370,17 @@ describe('SKIN_SPEC §11.6 — the carry pose', () => {
 });
 
 describe('SKIN_SPEC §11.7 — the swing animation', () => {
-  const FRAMES = [0, 0.07, 0.14, 0.21, 0.32, 0.40, 0.46, 0.60, 0.80, 0.95, 1];
+  // Where the visual strike lands. Gameplay damage resolves at progress 0, so this is the
+  // sync error, and it is the number the animation is timed around.
+  const SWING_IMPACT = 0.10;
+
+  // Every pose a player can actually see at 60 fps, plus a fine sweep. The wind-up and the
+  // strike occupy under two rendered frames each, so a coarse sample would step over them.
+  const FRAMES = [];
+  for (let p = 0; p <= 1.0001; p += 0.01) FRAMES.push(Math.min(1, +p.toFixed(4)));
+  for (let f = 0; f <= Math.ceil(PICKAXE.swingInterval * 60); f++) {
+    FRAMES.push(Math.min(1, f / 60 / PICKAXE.swingInterval));
+  }
 
   const rigs = SKINS.map((skin) => ({ skin, metrics: buildCharacterRig(skin).metrics }));
   const combinations = rigs.flatMap(({ skin, metrics }) => TOOLS.map((tool) => ({
@@ -404,17 +414,17 @@ describe('SKIN_SPEC §11.7 — the swing animation', () => {
   });
 
   it('moves through wind-up, strike and recovery in order', () => {
-    expect(swingPose(0.05).phase).toBe(SwingPhase.WINDUP);
-    expect(swingPose(0.25).phase).toBe(SwingPhase.STRIKE);
-    expect(swingPose(0.40).phase).toBe(SwingPhase.RECOVER);
-    expect(swingPose(0.90).phase).toBe(SwingPhase.CARRY);
+    expect(swingPose(0.03).phase).toBe(SwingPhase.WINDUP);
+    expect(swingPose(0.07).phase).toBe(SwingPhase.STRIKE);
+    expect(swingPose(0.18).phase).toBe(SwingPhase.RECOVER);
+    expect(swingPose(0.60).phase).toBe(SwingPhase.CARRY);
 
     // The head rises for the wind-up, then drives down and forward through the strike.
     const m = rigs[0].metrics;
     const head = (p) => swungPoint(m, 1, p, toolMetrics(1).gripToHead);
     const carry = head(1);
-    const windup = head(0.14);
-    const strike = head(0.32);
+    const windup = head(SWING_IMPACT / 2);
+    const strike = head(SWING_IMPACT);
     expect(windup.y, 'wind-up does not raise the tool').toBeGreaterThan(carry.y + 1);
     expect(strike.y, 'strike does not come back down').toBeLessThan(windup.y - 0.8);
     expect(strike.z, 'strike does not drive forward').toBeGreaterThan(carry.z);
@@ -488,6 +498,47 @@ describe('SKIN_SPEC §11.7 — the swing animation', () => {
         const head = swungPoint(metrics, headScale, p, tm.gripToHead);
         expect(head.y - tm.headHeight / 2, `${label} head below ground at p=${p}`)
           .toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('lands the visual strike close behind the gameplay hit', () => {
+    // Gameplay resolves damage at progress 0. The strike cannot be AT 0 — an arc with no
+    // wind-up in it reads as a twitch — but it must be close, or the hit and the swing look
+    // like separate events.
+    expect(SWING_IMPACT).toBeLessThanOrEqual(0.12);
+    expect(SWING_IMPACT * PICKAXE.swingInterval).toBeLessThan(0.07);   // under 70 ms
+
+    // The arc's own extremes must sit where that claim says they do: raised before the
+    // strike, driven down and forward at it.
+    const m = rigs[0].metrics;
+    const head = (p) => swungPoint(m, 1, p, toolMetrics(1).gripToHead);
+    let highest = 0;
+    let highestAt = 0;
+    for (const p of FRAMES) {
+      const y = head(p).y;
+      if (y > highest) { highest = y; highestAt = p; }
+    }
+    expect(highestAt, 'peak wind-up is not before the strike').toBeLessThan(SWING_IMPACT);
+    expect(head(SWING_IMPACT).y, 'tool has not come down by the strike')
+      .toBeLessThan(highest - 0.8);
+  });
+
+  it('stays clear of the third-person camera', () => {
+    // The camera trails over the same shoulder the tool is carried on, so a raised tool is
+    // the one thing that could reach it. Checked at every 60 fps pose, for the camera at its
+    // resting trail and pulled half way in.
+    for (const trail of [CAMERA.distance, CAMERA.distance * 0.5, 0.4]) {
+      const eye = { x: CAMERA.shoulderOffsetX, y: CAMERA.heightAbovebase, z: -trail };
+      for (const { label, metrics, headScale, tm } of combinations) {
+        for (const p of FRAMES) {
+          for (const along of [tm.gripToHead, tm.gripToHead * 0.5, 0, -tm.gripToButt]) {
+            const q = swungPoint(metrics, headScale, p, along);
+            const gap = Math.hypot(q.x - eye.x, q.y - eye.y, q.z - eye.z) - tm.headHeight / 2;
+            expect(gap, `${label} reaches the camera at p=${p}, trail ${trail}`)
+              .toBeGreaterThan(CAMERA.collisionRadius);
+          }
+        }
       }
     }
   });

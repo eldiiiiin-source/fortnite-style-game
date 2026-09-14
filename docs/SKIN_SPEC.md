@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
-| Version | 1.4.0 |
+| Version | 1.4.1 |
 | Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
 | Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
 | Implementation | Complete |
@@ -502,9 +502,18 @@ lifts the tool overhead, drives it down and forward through the target, and sett
 **Gameplay is authoritative. The animation never is.** It is driven by
 `Pickaxe.swingProgress` — a READ of the swing cooldown, normalised to 0 at the strike and
 1 once recovered. There is no second clock, so the animation cannot change the swing rate,
-the damage, the range or the hit test. Damage resolves the instant the swing is called, at
-progress 0; the visual strike peaks a little later, because a wind-up with no wind-up in it
-reads as a twitch. That lead is presentation, and it moves no gameplay value.
+the damage, the range or the hit test.
+
+**The visual strike is timed to the hit.** Damage resolves the instant the swing is called,
+at progress 0, so the arc reaches its strike as early as an arc can: peak wind-up at 0.05,
+impact at **0.10** — 55 ms behind the hit at the current swing interval. It cannot be at 0
+exactly; a swing with no wind-up in it reads as a twitch rather than as a strike.
+
+The cost of that sync is frame count, and it is worth stating plainly: at 0.55 s and 60 fps
+a swing is 33 rendered frames, so the wind-up and the strike get under two frames each. The
+motion is deliberately snappy, and the follow-through and the long settle back to carry are
+what carry its readability. Moving the impact earlier still would spend the wind-up
+entirely; moving it later re-opens the sync gap.
 
 The arm rotates about the SHOULDER and the tool rides in its hand, so one joint carries
 both. Animating a tool apart from the arm holding it slides it out of the hand.
@@ -545,6 +554,7 @@ emits — never per-item artwork, which is why adding a cosmetic never means dra
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4.1 | 2026-09-14 | §11.7: visual strike retimed from progress 0.32 to 0.10, cutting the gap between the gameplay hit and the visible impact from 176 ms to 55 ms. Arc, poses and gameplay timing unchanged — keyframe times only. |
 | 1.4.0 | 2026-09-14 | Adds §11.7: a visual swing animation for harvesting tools — overhead wind-up, strike through the target, settle back to the carry pose — driven by `Pickaxe.swingProgress`, a read of the gameplay cooldown, so no gameplay timing, damage, range or hit test changes. |
 | 1.3.1 | 2026-09-14 | §11.6: harvesting tools are carried in the hand at the side, angled down and forward, instead of tipped up behind the shoulder where they lay across the character's silhouette. Pose authored as a direction and clamped per rig. |
 | 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |

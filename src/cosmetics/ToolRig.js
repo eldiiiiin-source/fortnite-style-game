@@ -136,12 +136,18 @@ export const SwingPhase = Object.freeze({
  *
  * The first and last frames are the carry pose exactly, so a swing begins and ends where
  * the approved idle pose sits and repeated swings loop without a snap.
+ *
+ * TIMED TO THE HIT. Gameplay resolves damage at progress 0, so the strike is placed as
+ * early as an arc can reach it: peak wind-up at 0.05 and impact at 0.10, which is 55 ms
+ * after the hit at the current swing interval rather than 176 ms. The cost is that the
+ * wind-up and the strike get about 1.7 rendered frames each at 60 fps — deliberately
+ * snappy. The follow-through and the long settle back to carry carry the readability.
  */
 const SWING_KEYS = [
   { at: 0.00, armX: 0.00, armZ: 0.00, tool: 0.00, phase: SwingPhase.CARRY },
-  { at: 0.14, armX: -2.15, armZ: -0.16, tool: 0.50, phase: SwingPhase.WINDUP },
-  { at: 0.32, armX: -0.30, armZ: 0.10, tool: -0.70, phase: SwingPhase.STRIKE },
-  { at: 0.46, armX: 0.12, armZ: 0.05, tool: -0.35, phase: SwingPhase.RECOVER },
+  { at: 0.05, armX: -2.15, armZ: -0.16, tool: 0.50, phase: SwingPhase.WINDUP },
+  { at: 0.10, armX: -0.30, armZ: 0.10, tool: -0.70, phase: SwingPhase.STRIKE },
+  { at: 0.25, armX: 0.12, armZ: 0.05, tool: -0.35, phase: SwingPhase.RECOVER },
   { at: 1.00, armX: 0.00, armZ: 0.00, tool: 0.00, phase: SwingPhase.CARRY }
 ];
 
