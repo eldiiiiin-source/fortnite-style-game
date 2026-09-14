@@ -167,8 +167,9 @@ export const TOOLS = Object.freeze([
     details: [D.BOLTS, D.BINDING, D.SPIKES, D.RAGS, D.COUNTERWEIGHT,
       D.WELD_PLATES, D.CHAIN_LASH],
     // Oversized on purpose: a signature tool has to carry a shop card that a common one
-    // does not (§11.3.1). View only — reach and damage are unchanged.
-    headScale: 1.34,
+    // does not (§11.3.1). Trimmed from 1.34 in the 1.3.1 polish — at 1.34 the head
+    // occluded the wearer's flank in third person. View only; reach and damage unchanged.
+    headScale: 1.22,
     pricePosition: 0.75,
     tags: ['scrap'],
     palette: {

@@ -484,7 +484,7 @@ const FEATURE_BUILDERS = {
   [Feature.HEAD_WRAP](m, parts) {
     const r = m.headRadius;
     // Cloth wrap: a tall soft crown, a banded brow, a knot and a short trailing tail.
-    parts.push(sphere('wrapCrown', BodyRegion.HEAD, 'hair', r * 1.18,
+    parts.push(sphere('wrapCrown', BodyRegion.HEAD, 'hair', r * 1.1,
       v(0, m.headY + r * 0.54, -r * 0.04)));
     parts.push(bevelBox('wrapBand', BodyRegion.HEAD, 'hair',
       v(r * 2.16, r * 0.44, r * 2.08),
@@ -622,9 +622,18 @@ const FEATURE_BUILDERS = {
   [Feature.NECK_WRAP](m, parts) {
     // Heavy wrap with a fold and a hanging tail: bulk at the neck broadens the shoulder
     // line, which is most of what makes a heavy frame read as heavy.
+    // A standing collar around the wrap: the vertical at the neck is what reads as
+    // military rather than as a scarf.
     parts.push(cylinder('neckWrap', BodyRegion.TORSO, 'detail',
-      m.neckWidth * 1.3, m.neckLength * 1.7,
-      v(0, m.shoulderY + m.neckLength * 0.4, 0)));
+      m.neckWidth * 1.34, m.neckLength * 1.8,
+      v(0, m.shoulderY + m.neckLength * 0.44, 0)));
+    parts.push(cylinder('collarStand', BodyRegion.TORSO, 'secondary',
+      m.neckWidth * 1.32, m.neckLength * 0.95,
+      v(0, m.shoulderY + m.neckLength * 0.92, 0), null, m.neckWidth * 1.16));
+    // Narrow: a trim ring wider than the head reads as a lampshade rather than a collar.
+    parts.push(box('collarTrim', BodyRegion.TORSO, 'accent',
+      v(m.neckWidth * 2.3, m.neckLength * 0.13, m.neckWidth * 2.3),
+      v(0, m.shoulderY + m.neckLength * 1.3, 0)));
     parts.push(bevelBox('wrapShoulder', BodyRegion.TORSO, 'detail',
       v(m.shoulderWidth * 0.5, m.neckLength * 0.8, m.torsoDepth * 1.02),
       v(0, m.shoulderY - m.neckLength * 0.2, 0)));
@@ -870,6 +879,12 @@ const FEATURE_BUILDERS = {
     parts.push(box('assaultVisorGap', BodyRegion.HEAD, 'visor',
       v(r * 1.5, r * 0.3, r * 0.2),
       v(0, m.headY + r * 0.08, r * 1.0)));
+    parts.push(wedge('assaultPeak', BodyRegion.HEAD, 'detail',
+      v(r * 2.3, r * 0.3, r * 0.86),
+      v(0, m.headY + r * 0.74, r * 0.86)));
+    parts.push(bevelBox('assaultChinBar', BodyRegion.HEAD, 'secondary',
+      v(r * 1.72, r * 0.3, r * 0.44),
+      v(0, m.headY - r * 0.74, r * 0.84)));
     parts.push(box('assaultCrest', BodyRegion.HEAD, 'accent',
       v(r * 0.24, r * 0.26, r * 2.3),
       v(0, m.headY + r * 1.5, -r * 0.06)));
@@ -884,23 +899,78 @@ const FEATURE_BUILDERS = {
     const r = m.headRadius;
     // Long, asymmetric and moving: a back mass, a swept crown, one forward lock over the
     // shoulder and a shorter one on the other side. The unevenness is the silhouette.
+    // Trimmed in the 1.3.1 polish: the mass AROUND the skull came down, the length and
+    // the asymmetry did not. The back fall still carries the silhouette.
     parts.push(bevelBox('hairBack', BodyRegion.HEAD, 'hair',
-      v(r * 1.86, r * 2.7, r * 0.7),
-      v(0, m.headY - r * 1.0, -r * 0.9)));
+      v(r * 1.64, r * 2.62, r * 0.6),
+      v(0, m.headY - r * 1.04, -r * 0.94)));
     parts.push(bevelBox('hairSweep', BodyRegion.HEAD, 'hair',
-      v(r * 2.06, r * 0.68, r * 1.3),
-      v(r * 0.22, m.headY + r * 0.88, -r * 0.06), v(0, 0, -0.22)));
+      v(r * 1.86, r * 0.56, r * 1.14),
+      v(r * 0.2, m.headY + r * 0.92, -r * 0.1), v(0, 0, -0.22)));
     // Locks sit OUTSIDE the cheek line and behind the face plane, so they frame the face
     // rather than closing over it.
     parts.push(bevelBox('hairLockLong', BodyRegion.HEAD, 'hair',
-      v(r * 0.54, r * 2.4, r * 0.48),
-      v(-r * 1.12, m.headY - r * 0.92, r * 0.14), v(0, 0, 0.08)));
+      v(r * 0.46, r * 2.36, r * 0.42),
+      v(-r * 1.06, m.headY - r * 0.94, r * 0.12), v(0, 0, 0.08)));
     parts.push(bevelBox('hairLockShort', BodyRegion.HEAD, 'hair',
-      v(r * 0.44, r * 1.4, r * 0.44),
-      v(r * 1.14, m.headY - r * 0.44, r * 0.12), v(0, 0, -0.1)));
+      v(r * 0.38, r * 1.34, r * 0.38),
+      v(r * 1.08, m.headY - r * 0.46, r * 0.1), v(0, 0, -0.1)));
     parts.push(box('hairTip', BodyRegion.HEAD, 'accent',
       v(r * 0.56, r * 0.22, r * 0.5),
       v(-r * 1.12, m.headY - r * 2.06, r * 0.14)));
+  },
+
+  [Feature.FITTED_TORSO](m, parts) {
+    // Goldspar's shoulder treatment: a narrow fitted cap instead of the broad
+    // `shoulderCaps`, plus a cinched waist. A narrower shoulder read with a stronger
+    // waist taper is what turns a boxy trunk into a figure.
+    for (const side of [-1, 1]) {
+      const tag = side < 0 ? BodyRegion.ARM_L : BodyRegion.ARM_R;
+      const sfx = side < 0 ? 'L' : 'R';
+      parts.push(bevelBox(`fittedCap${sfx}`, tag, 'primary',
+        v(m.armWidth * 1.06, m.armLength * 0.15, m.armDepth * 1.04),
+        v(side * m.armX, m.shoulderY - m.armLength * 0.08, 0),
+        v(0, 0, side * 0.14)));
+      parts.push(box(`fittedPiping${sfx}`, tag, 'accent',
+        v(m.armWidth * 1.0, m.armLength * 0.035, m.armDepth * 1.0),
+        v(side * m.armX, m.shoulderY - m.armLength * 0.16, 0)));
+    }
+    // The cinch: a narrow band low on the trunk, with a panel above it that narrows into
+    // it. Two pieces, and the waist reads.
+    parts.push(cylinder('waistCinch', BodyRegion.TORSO, 'detail',
+      m.shoulderWidth * 0.34, m.torsoHeight * 0.14,
+      v(0, m.hipTop + m.torsoHeight * 0.2, 0), null, m.shoulderWidth * 0.31));
+    parts.push(cylinder('waistPanel', BodyRegion.TORSO, 'primary',
+      m.shoulderWidth * 0.44, m.torsoHeight * 0.34,
+      v(0, m.hipTop + m.torsoHeight * 0.42, 0), null, m.shoulderWidth * 0.33));
+    parts.push(box('cinchClasp', BodyRegion.TORSO, 'accent',
+      v(m.shoulderWidth * 0.16, m.torsoHeight * 0.1, m.torsoDepth * 0.26),
+      v(0, m.hipTop + m.torsoHeight * 0.2, m.torsoDepth * 0.5)));
+  },
+
+  [Feature.PAULDRONS](m, parts) {
+    // Coalcrest's shoulder treatment: hard angular plates sitting proud of the deltoid,
+    // with a trim edge and a strap under them. Squaring off the shoulder line is what
+    // makes a heavy frame read as armoured rather than merely wide.
+    for (const side of [-1, 1]) {
+      const tag = side < 0 ? BodyRegion.ARM_L : BodyRegion.ARM_R;
+      const sfx = side < 0 ? 'L' : 'R';
+      parts.push(bevelBox(`pauldron${sfx}`, tag, 'secondary',
+        v(m.armWidth * 1.66, m.armLength * 0.28, m.armDepth * 1.5),
+        v(side * (m.armX + m.armWidth * 0.14), m.shoulderY - m.armLength * 0.02, 0),
+        v(0, 0, side * 0.16)));
+      parts.push(bevelBox(`pauldronLip${sfx}`, tag, 'detail',
+        v(m.armWidth * 1.5, m.armLength * 0.1, m.armDepth * 1.38),
+        v(side * (m.armX + m.armWidth * 0.16), m.shoulderY - m.armLength * 0.19, 0),
+        v(0, 0, side * 0.16)));
+      parts.push(box(`pauldronTrim${sfx}`, tag, 'accent',
+        v(m.armWidth * 1.42, m.armLength * 0.045, m.armDepth * 1.3),
+        v(side * (m.armX + m.armWidth * 0.18), m.shoulderY + m.armLength * 0.09, 0)));
+    }
+    // A yoke across the back, tying the two plates into one shoulder line.
+    parts.push(bevelBox('shoulderYoke', BodyRegion.BACK, 'secondary',
+      v(m.shoulderWidth * 1.02, m.torsoHeight * 0.16, m.torsoDepth * 0.3),
+      v(0, m.shoulderY - m.torsoHeight * 0.1, -m.torsoDepth * 0.44)));
   },
 
   [Feature.PAINTED_GRIN](m, parts) {

@@ -78,7 +78,13 @@ export const Feature = Object.freeze({
   THIGH_STRAPS: 'thighStraps',
   ASSAULT_HELMET: 'assaultHelmet',
   SWEPT_HAIR: 'sweptHair',
-  PAINTED_GRIN: 'paintedGrin'
+  PAINTED_GRIN: 'paintedGrin',
+
+  /* Per-skin shoulder treatments — SKIN_SPEC §6.4.
+   * Two outfits need OPPOSITE shoulder reads, so each carries its own rather than both
+   * pulling on the shared `shoulderCaps` and dragging the third along with them. */
+  FITTED_TORSO: 'fittedTorso',
+  PAULDRONS: 'pauldrons'
 });
 
 const F = Feature;
@@ -375,7 +381,7 @@ const SIGNATURE = [
     description: 'Flies in, walks out. The gear has never needed explaining.',
     build: Build.LEAN,
     features: [
-      F.AVIATOR_CAP, F.BROW_GOGGLES, F.TANK_TOP, F.TORSO_TAPER, F.SHOULDER_CAPS,
+      F.AVIATOR_CAP, F.BROW_GOGGLES, F.TANK_TOP, F.TORSO_TAPER, F.FITTED_TORSO,
       F.FINGERLESS_GLOVES, F.BELT_RIG, F.HIP_FLAPS, F.THIGH_RIG, F.THIGH_STRAPS,
       F.COMBAT_BOOTS
     ],
@@ -419,7 +425,7 @@ const SIGNATURE = [
     build: Build.HEAVY,
     features: [
       F.ASSAULT_HELMET, F.NECK_WRAP, F.TANK_TOP, F.TORSO_TAPER, F.SHOULDER_CAPS,
-      F.SHOULDER_STRAP, F.BELT_RIG, F.HIP_FLAPS, F.ARM_WRAPS, F.KNEE_PADS
+      F.PAULDRONS, F.SHOULDER_STRAP, F.BELT_RIG, F.HIP_FLAPS, F.ARM_WRAPS, F.KNEE_PADS
     ],
     pricePosition: 0.85,
     set: 'Gilded Vanguard',
