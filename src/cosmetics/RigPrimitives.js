@@ -22,7 +22,18 @@ export const PartShape = Object.freeze({
  * item may use it and a legendary one need not (SKIN_SPEC §8).
  */
 export const box = (id, tag, role, size, pos, rot = null, glow = false) => ({
-  id, tag, role, shape: PartShape.BOX, size, pos, rot, glow
+  id, tag, role, shape: PartShape.BOX, size, pos, rot, glow, bevel: false
+});
+
+/**
+ * A bevelled box — SKIN_SPEC §6.5.
+ *
+ * Identical to `box` but with chamfered corners. The single loudest "placeholder" signal
+ * in a stylised character is a stack of hard-edged rectangles; a bevel costs one flag and
+ * removes that read. Opt-in per part, so nothing already shipped changes.
+ */
+export const bevelBox = (id, tag, role, size, pos, rot = null, glow = false) => ({
+  id, tag, role, shape: PartShape.BOX, size, pos, rot, glow, bevel: true
 });
 
 export const sphere = (id, tag, role, radius, pos, glow = false) => ({

@@ -67,7 +67,18 @@ export const Feature = Object.freeze({
   NECK_WRAP: 'neckWrap',
   FACE_MARKINGS: 'faceMarkings',
   SKULL_MASK: 'skullMask',
-  BONE_PATTERN: 'bonePattern'
+  BONE_PATTERN: 'bonePattern',
+
+  /* Costume layering — SKIN_SPEC §6.4 */
+  SHOULDER_CAPS: 'shoulderCaps',
+  TORSO_TAPER: 'torsoTaper',
+  BELT_RIG: 'beltRig',
+  HIP_FLAPS: 'hipFlaps',
+  ARM_WRAPS: 'armWraps',
+  THIGH_STRAPS: 'thighStraps',
+  ASSAULT_HELMET: 'assaultHelmet',
+  SWEPT_HAIR: 'sweptHair',
+  PAINTED_GRIN: 'paintedGrin'
 });
 
 const F = Feature;
@@ -343,7 +354,11 @@ const SIGNATURE = [
     theme: 'Neon revenant',
     description: 'Came back wrong, came back brighter. No complaints so far.',
     build: Build.LEAN,
-    features: [F.HEAD_WRAP, F.BROW_GOGGLES, F.TANK_TOP, F.FACE_MARKINGS, F.UTILITY_BELT],
+    features: [
+      F.SWEPT_HAIR, F.HEAD_WRAP, F.BROW_GOGGLES, F.FACE_MARKINGS, F.PAINTED_GRIN,
+      F.TANK_TOP, F.TORSO_TAPER, F.SHOULDER_CAPS, F.SHOULDER_STRAP, F.BELT_RIG,
+      F.ARM_WRAPS
+    ],
     pricePosition: 0.8,
     tags: ['spooky', 'neon'],
     palette: {
@@ -360,8 +375,9 @@ const SIGNATURE = [
     description: 'Flies in, walks out. The gear has never needed explaining.',
     build: Build.LEAN,
     features: [
-      F.AVIATOR_CAP, F.BROW_GOGGLES, F.TANK_TOP, F.FINGERLESS_GLOVES,
-      F.THIGH_RIG, F.COMBAT_BOOTS
+      F.AVIATOR_CAP, F.BROW_GOGGLES, F.TANK_TOP, F.TORSO_TAPER, F.SHOULDER_CAPS,
+      F.FINGERLESS_GLOVES, F.BELT_RIG, F.HIP_FLAPS, F.THIGH_RIG, F.THIGH_STRAPS,
+      F.COMBAT_BOOTS
     ],
     pricePosition: 0.9,
     set: 'Gilded Vanguard',
@@ -379,7 +395,10 @@ const SIGNATURE = [
     theme: 'Glowing skeleton',
     description: 'Whatever is holding it together is doing so in violet.',
     build: Build.ATHLETIC,
-    features: [F.SKULL_MASK, F.BONE_PATTERN, F.THIGH_RIG, F.KNEE_PADS, F.COMBAT_BOOTS],
+    features: [
+      F.SKULL_MASK, F.BONE_PATTERN, F.TORSO_TAPER, F.THIGH_RIG, F.THIGH_STRAPS,
+      F.KNEE_PADS, F.COMBAT_BOOTS
+    ],
     pricePosition: 0.95,
     tags: ['spooky', 'glow'],
     // The skeletal pattern IS this character's silhouette and readability, not decoration
@@ -399,7 +418,8 @@ const SIGNATURE = [
     description: 'Same colours as Goldspar, half the patience.',
     build: Build.HEAVY,
     features: [
-      F.HELMET, F.NECK_WRAP, F.TANK_TOP, F.SHOULDER_STRAP, F.UTILITY_BELT, F.KNEE_PADS
+      F.ASSAULT_HELMET, F.NECK_WRAP, F.TANK_TOP, F.TORSO_TAPER, F.SHOULDER_CAPS,
+      F.SHOULDER_STRAP, F.BELT_RIG, F.HIP_FLAPS, F.ARM_WRAPS, F.KNEE_PADS
     ],
     pricePosition: 0.85,
     set: 'Gilded Vanguard',

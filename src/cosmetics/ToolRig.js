@@ -17,7 +17,7 @@
  */
 import { PICKAXE_VIEW } from '../core/Config.js';
 import { HeadForm, HaftStyle, ToolDetail, toolOrFallback } from './ToolDefinitions.js';
-import { box, cone, cylinder, wedge, v, depthSort } from './RigPrimitives.js';
+import { box, bevelBox, cone, cylinder, wedge, v, depthSort } from './RigPrimitives.js';
 
 /** Regions of a tool, so a consumer can address the head without knowing the form. */
 export const ToolRegion = Object.freeze({
@@ -27,7 +27,7 @@ export const ToolRegion = Object.freeze({
 });
 
 /** Tool metrics, all derived from the view-scale constants (§11.1). */
-export function toolMetrics() {
+export function toolMetrics(headScale = 1) {
   const length = PICKAXE_VIEW.length;
   return {
     length,
@@ -36,9 +36,10 @@ export function toolMetrics() {
     // makes it read as a swung tool rather than as a staff.
     gripToHead: length * 0.62,
     gripToButt: length * 0.38,
-    headWidth: PICKAXE_VIEW.headWidth,
-    headDepth: PICKAXE_VIEW.headDepth,
-    headHeight: PICKAXE_VIEW.headHeight
+    headScale,
+    headWidth: PICKAXE_VIEW.headWidth * headScale,
+    headDepth: PICKAXE_VIEW.headDepth * headScale,
+    headHeight: PICKAXE_VIEW.headHeight * headScale
   };
 }
 
@@ -59,6 +60,26 @@ const HAFT_BUILDERS = {
     parts.push(cylinder('grip', ToolRegion.HAFT, 'secondary',
       m.haftRadius * 1.3, m.length * 0.22,
       v(0, 0, 0)));
+  },
+
+  [HaftStyle.SALVAGE](m, parts) {
+    // A salvaged tube: welded collar, taped grip, a spacer where a second piece was
+    // joined on. Three visible joints say "built from other things" before any colour does.
+    parts.push(cylinder('haft', ToolRegion.HAFT, 'secondary',
+      m.haftRadius * 1.16, m.length,
+      v(0, m.gripToHead - m.length / 2, 0)));
+    parts.push(cylinder('haftWeldCollar', ToolRegion.HAFT, 'primary',
+      m.haftRadius * 1.7, m.length * 0.07,
+      v(0, m.gripToHead * 0.62, 0)));
+    parts.push(cylinder('haftSpacer', ToolRegion.HAFT, 'detail',
+      m.haftRadius * 1.44, m.length * 0.05,
+      v(0, m.gripToHead * 0.2, 0)));
+    parts.push(cylinder('grip', ToolRegion.HAFT, 'detail',
+      m.haftRadius * 1.42, m.length * 0.28,
+      v(0, -m.length * 0.02, 0)));
+    parts.push(bevelBox('gripTape', ToolRegion.HAFT, 'accent',
+      v(m.haftRadius * 2.9, m.length * 0.035, m.haftRadius * 2.9),
+      v(0, m.length * 0.09, 0)));
   },
 
   [HaftStyle.PIPE](m, parts) {
@@ -160,28 +181,48 @@ const HEAD_BUILDERS = {
    */
   [HeadForm.SCRAP](m, parts) {
     const y = m.gripToHead;
-    parts.push(box('backingBar', ToolRegion.HEAD, 'secondary',
-      v(m.headWidth * 0.86, m.headHeight * 0.34, m.headDepth * 0.46),
-      v(0, y, 0)));
-    parts.push(box('scrapPlate', ToolRegion.HEAD, 'accent',
-      v(m.headWidth * 0.78, m.headHeight * 0.8, m.headDepth * 0.3),
-      v(m.headWidth * 0.12, y + m.headHeight * 0.1, m.headDepth * 0.16),
-      v(0, 0, 0.12)));
-    parts.push(box('weldSeam', ToolRegion.HEAD, 'primary',
-      v(m.headWidth * 0.82, m.headHeight * 0.1, m.headDepth * 0.36),
-      v(m.headWidth * 0.1, y + m.headHeight * 0.42, m.headDepth * 0.12)));
+    const w = m.headWidth;
+    const h = m.headHeight;
+    const d = m.headDepth;
+
+    // Backing bar: what everything else is welded onto.
+    parts.push(bevelBox('backingBar', ToolRegion.HEAD, 'secondary',
+      v(w * 0.9, h * 0.4, d * 0.52), v(0, y, 0)));
+
+    // The cleaver: a broad rust-red plate overhanging ONE side, with a bright bare-metal
+    // edge beyond it. Breadth here is what makes the tool look dangerous rather than busy.
+    parts.push(bevelBox('cleaverPlate', ToolRegion.HEAD, 'accent',
+      v(w * 0.72, h * 1.06, d * 0.34),
+      v(w * 0.36, y + h * 0.12, d * 0.1), v(0, 0, 0.1)));
+    parts.push(bevelBox('cleaverBack', ToolRegion.HEAD, 'primary',
+      v(w * 0.3, h * 1.1, d * 0.4),
+      v(w * 0.1, y + h * 0.1, -d * 0.14), v(0, 0, 0.1)));
     parts.push(wedge('cuttingEdge', ToolRegion.HEAD, 'edge',
-      v(m.headWidth * 0.34, m.headHeight * 0.9, m.headDepth * 0.34),
-      v(m.headWidth * 0.56, y + m.headHeight * 0.08, 0),
-      v(0, 0, -Math.PI / 2 + 0.14)));
+      v(w * 0.42, h * 1.16, d * 0.36),
+      v(w * 0.78, y + h * 0.14, 0), v(0, 0, -Math.PI / 2 + 0.1)));
+    parts.push(box('edgeGlint', ToolRegion.HEAD, 'edge',
+      v(w * 0.1, h * 1.0, d * 0.38),
+      v(w * 0.64, y + h * 0.14, 0), v(0, 0, 0.1)));
+
+    // The counter-spike: long, narrow and tapered — deliberately nothing like the cleaver,
+    // so the two ends of the head never read as the same shape (§11.5).
     parts.push(cone('counterSpike', ToolRegion.HEAD, 'primary',
-      m.headHeight * 0.2, m.headWidth * 0.44,
-      v(-m.headWidth * 0.44, y - m.headHeight * 0.08, 0),
-      v(0, 0, Math.PI / 2 + 0.18)));
-    parts.push(box('shim', ToolRegion.HEAD, 'secondary',
-      v(m.headWidth * 0.2, m.headHeight * 0.5, m.headDepth * 0.5),
-      v(-m.headWidth * 0.2, y - m.headHeight * 0.24, -m.headDepth * 0.1),
-      v(0, 0, -0.2)));
+      h * 0.22, w * 0.78,
+      v(-w * 0.56, y - h * 0.04, 0), v(0, 0, Math.PI / 2 + 0.14)));
+    parts.push(box('spikeRoot', ToolRegion.HEAD, 'secondary',
+      v(w * 0.22, h * 0.46, d * 0.46),
+      v(-w * 0.22, y - h * 0.02, 0)));
+
+    // Shim and torn plate wedged behind the joint: the layering that says "welded".
+    parts.push(bevelBox('shim', ToolRegion.HEAD, 'secondary',
+      v(w * 0.24, h * 0.54, d * 0.56),
+      v(-w * 0.1, y - h * 0.34, -d * 0.12), v(0, 0, -0.24)));
+    parts.push(bevelBox('tornPlate', ToolRegion.HEAD, 'accent',
+      v(w * 0.36, h * 0.4, d * 0.2),
+      v(-w * 0.3, y + h * 0.34, d * 0.24), v(0, 0, 0.42)));
+    parts.push(box('weldSeam', ToolRegion.HEAD, 'primary',
+      v(w * 0.86, h * 0.11, d * 0.42),
+      v(w * 0.04, y + h * 0.46, d * 0.06)));
   }
 };
 
@@ -215,11 +256,11 @@ const DETAIL_BUILDERS = {
 
   [ToolDetail.SPIKES](m, parts) {
     // Welded along the back of the haft, uneven on purpose.
-    [0.2, 0.36, 0.5].forEach((t, i) => {
+    [0.24, 0.42, 0.58, 0.74].forEach((t, i) => {
       parts.push(cone(`spike${i}`, ToolRegion.DETAIL, 'edge',
-        m.haftRadius * 0.8, m.haftRadius * (3.4 - i * 0.5),
-        v(0, m.gripToHead * t, -m.haftRadius * 2.0),
-        v(Math.PI / 2 + 0.2, 0, 0)));
+        m.haftRadius * (0.92 - i * 0.08), m.haftRadius * (4.2 - i * 0.6),
+        v(0, m.gripToHead * t, -m.haftRadius * 2.2),
+        v(Math.PI / 2 + 0.18 + i * 0.05, 0, 0)));
     });
   },
 
@@ -232,6 +273,32 @@ const DETAIL_BUILDERS = {
       v(m.haftRadius * 1.2, m.length * 0.1, m.haftRadius * 0.4),
       v(m.haftRadius * 2.2, m.gripToHead * 0.52, -m.haftRadius * 1.5),
       v(0, 0, -0.42)));
+  },
+
+  [ToolDetail.WELD_PLATES](m, parts) {
+    // A stack of riveted plates across the joint, each offset from the last. Offsetting
+    // is what makes a stack read as salvage rather than as one thick slab.
+    const y = m.gripToHead;
+    [[-0.2, -0.5, 0.16], [0.12, -0.66, -0.1], [-0.02, -0.82, 0.08]].forEach(([dx, dy, dz], i) => {
+      parts.push(bevelBox(`weldPlate${i}`, ToolRegion.DETAIL, 'secondary',
+        v(m.headWidth * (0.5 - i * 0.07), m.headHeight * 0.2, m.headDepth * 0.4),
+        v(m.headWidth * dx, y + m.headHeight * dy, m.headDepth * dz),
+        v(0, 0, (i % 2 ? -1 : 1) * 0.16)));
+      parts.push(cylinder(`weldRivet${i}`, ToolRegion.DETAIL, 'edge',
+        m.headHeight * 0.055, m.headDepth * 0.45,
+        v(m.headWidth * dx, y + m.headHeight * dy, m.headDepth * dz),
+        v(Math.PI / 2, 0, 0)));
+    });
+  },
+
+  [ToolDetail.CHAIN_LASH](m, parts) {
+    // A short chain hanging off the collar, drawn as separate links so it reads as chain.
+    for (let i = 0; i < 4; i++) {
+      parts.push(cylinder(`chainLink${i}`, ToolRegion.DETAIL, 'primary',
+        m.haftRadius * 0.62, m.haftRadius * 0.9,
+        v(-m.haftRadius * (1.8 + i * 0.24), m.gripToHead * (0.5 - i * 0.1), -m.haftRadius * 1.2),
+        v(i % 2 ? Math.PI / 2 : 0, 0, 0.3)));
+    }
   },
 
   [ToolDetail.GLOW_EDGE](m, parts) {
@@ -257,7 +324,7 @@ export function buildToolRig(toolOrId) {
   const tool = typeof toolOrId === 'string'
     ? toolOrFallback(toolOrId)
     : (toolOrId ?? toolOrFallback(null));
-  const m = toolMetrics();
+  const m = toolMetrics(tool.headScale ?? 1);
   const parts = [];
 
   (HAFT_BUILDERS[tool.haft] ?? HAFT_BUILDERS[HaftStyle.STRAIGHT])(m, parts);

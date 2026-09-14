@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
-| Version | 1.2.0 |
+| Version | 1.3.0 |
 | Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
 | Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
 | Implementation | Complete |
@@ -182,6 +182,36 @@ draws a bloom behind it. This is a **material flag, not a rarity effect**: a com
 may use it and a legendary one need not. It never changes how visible a player is to
 another player at gameplay distance.
 
+### 6.4 Costume layering
+
+**[OWNER] fidelity pass, 2026-09-14.** A premium outfit is not one garment; it is garments
+*over* garments. The features below exist to build that stack, and the signature four are
+required to carry it (§9.12).
+
+| Feature | Layer it adds |
+| --- | --- |
+| `shoulderCaps` | Rounded deltoid caps that round off the shoulder corner |
+| `torsoTaper` | Chest-to-waist overlay that narrows the trunk |
+| `beltRig` | Layered waist: belt, buckle, side pouches, hanging strap |
+| `hipFlaps` | Asymmetric flaps hanging from the hip line |
+| `armWraps` | Wrapped forearms, one heavier than the other |
+| `thighStraps` | Cinch straps around the upper leg |
+| `assaultHelmet` | Domed helmet with a rear shroud and a rail |
+| `sweptHair` | Long asymmetric hair: back mass, forward lock, swept crown |
+| `paintedGrin` | Painted mouth and cheek marks |
+
+**Rule:** layering must read as *stacked*, not as *painted*. Every feature here changes the
+outline or casts over another part; none of them is a flat decal on a flat face.
+
+### 6.5 Bevelled parts
+
+A box part may set `bevel`. The 3D view chamfers its corners; the 2D painter draws it with
+cut corners instead of square ones.
+
+This exists because the single loudest "placeholder" signal in a stylised character is a
+stack of hard-edged rectangles. A bevel costs one flag and removes that read. It is opt-in
+per part so existing cosmetics are untouched.
+
 ### 6.3 Emissive structural pattern exception
 
 **[OWNER] Approved 2026-09-14, with restriction.**
@@ -278,20 +308,33 @@ this project's own rig, palette roles and feature vocabulary.
 | `outfit_voidmarrow` | Voidmarrow | Legendary | Glowing skeleton |
 | `outfit_coalcrest` | Coalcrest | Epic | Gilded operator |
 
-**Vexbloom** — hot pink skin against cyan cloth, two saturated hues at opposite ends of the
-wheel with everything else pushed neutral so they stay the whole story. Head wrap, goggles
-on the brow, sleeveless vest, painted face markings, utility belt. Lean frame.
+Revised in 1.3.0 by the owner's fidelity pass. IDs, rarity and pricing are unchanged; only
+the geometry and the layering moved.
 
-**Goldspar** — matte black carries the mass; gold appears only at buckles, soles and trim,
-which is what keeps it reading as expensive rather than as costume. Aviator cap, brow
-goggles, sleeveless, fingerless gloves, thigh rig, combat boots. Lean frame.
+**Vexbloom** — hot pink skin against cyan cloth, two saturated hues at opposite ends of the
+wheel with everything else pushed neutral so they stay the whole story. Lean frame. Swept
+asymmetric hair with a forward lock, cyan wrap, goggles pushed to the brow, painted grin
+and cheek marks, sleeveless vest over a tapered trunk, shoulder caps, cross strap, layered
+belt rig, wrapped forearms. The asymmetry is deliberate and constant: hair, strap and belt
+each break the mirror in a different place.
+
+**Goldspar** — matte black carries the mass; gold appears only at buckles, soles, trim and
+cap fittings, which is what keeps it reading as expensive rather than as costume. Lean
+frame. Aviator cap with rear shroud and jaw flaps, brow goggles on a gold-ringed mount,
+sleeveless with a tapered trunk and shoulder caps, fingerless gloves, layered belt rig,
+asymmetric hip flap, thigh rig with cinch straps, tall combat boots with gold soles.
 
 **Voidmarrow** — a near-black base so the self-lit violet bones are the only thing the eye
-lands on. Skull mask, bone pattern, thigh rig, knee pads, combat boots. Athletic frame.
+lands on. Athletic frame. Anatomical stylised skeleton: collar, sternum, a tapering rib
+cage, a pelvic girdle, femurs, tibias, humerus and forearm bones, and a spine with a solid
+backing so the glow never floats. Skull mask with a pronounced brow ridge, cheekbones and a
+separated jaw. Every bone sits over solid geometry — the body reads beneath the glow.
 
 **Coalcrest** — Goldspar's palette on a heavy frame: same colours, different mass, so the
 two read as a matched set (`Gilded Vanguard`) without either looking like a recolour.
-Helmet, neck wrap, sleeveless, shoulder strap, utility belt, knee pads.
+Assault helmet with rear shroud and rail, heavy neck wrap, sleeveless over a broadened
+tapered chest, shoulder caps, diagonal baldric with clip, layered belt rig, hip flaps,
+wrapped forearms, knee pads. Deliberately the broadest silhouette of the four.
 
 ### 7.4 Rarity distribution
 
@@ -351,6 +394,10 @@ the world — it would be a gameplay tell and hand paying players an advantage, 
     decision: a synthetic legendary over the limit is refused.
 11. Every harvesting tool builds a rig with a haft and a head, and no tool carries a
     gameplay field.
+12. Each of the signature four carries real costume layering: a minimum part count, parts
+    in every body region, at least one asymmetric element, and bevelled geometry.
+13. The fidelity pass preserves save compatibility: every roster ID, rarity and price is
+    unchanged by it.
 
 ## 10. Where skins render
 
@@ -385,22 +432,33 @@ tools with their wielder.
 
 ### 11.3 Haft styles
 
-`straight`, `wrapped` (grip wrap at the hand), `pipe` (salvaged tube with a cut collar).
+`straight`, `wrapped` (grip wrap at the hand), `pipe` (salvaged tube with a cut collar),
+`salvage` (bent tube, taped grip, welded collar, hanging chain).
+
+### 11.3.1 Per-tool head scale
+
+A tool may declare `headScale` to run its head larger or smaller than the roster default.
+It is a **view** value with no gameplay reach — reach and damage stay in `PICKAXE` for
+every tool — and it exists because a signature tool has to carry a shop card that a common
+one does not.
 
 ### 11.4 Tool details
 
-`bolts`, `binding`, `counterweight`, `spikes`, `rags`, `glowEdge`.
+`bolts`, `binding`, `counterweight`, `spikes`, `rags`, `glowEdge`, `weldPlates` (stacked
+riveted plates), `chainLash` (chain hanging from the collar).
 
 ### 11.5 Scrapjaw
 
-The signature tool, sitting beside the premium outfits. Epic.
+The signature tool, sitting beside the premium outfits. Epic. Revised in 1.3.0.
 
 - **Palette** — dark steel body (`#4a525c`), rust-red plate (`#a8412a`), worn bare metal at
   the edge (`#b9c2cc`), near-black haft (`#241b14`).
-- **Silhouette** — deliberately asymmetric and layered: a plate bolted over a backing bar,
-  a cutting edge that overhangs one side only, a counter-spike on the other, and a shim
-  wedged behind. The asymmetry *is* the silhouette; a symmetrical scrap head just reads as
-  a hammer.
+- **Silhouette** — deliberately asymmetric and layered, and now oversized: the head runs at
+  `headScale` above the roster default so it dominates a shop card. A stack of welded
+  plates over a backing bar, a broad cleaver edge overhanging one side, a long tapered
+  counter-spike opposing it, a shim wedged behind, and a torn plate riveted across the
+  joint. The asymmetry *is* the silhouette; a symmetrical scrap head just reads as a
+  hammer, and the cutting edge and the counter-spike must never read as the same shape.
 - **Material** — pipe haft with a taped grip and a cut collar, cord lashing at the joint,
   welded spikes along the back, a hanging rag.
 - **Flavour** — *"Four things that failed at their old jobs, welded into one that does not."*
@@ -425,6 +483,7 @@ emits — never per-item artwork, which is why adding a cosmetic never means dra
 | Bloom behind self-lit parts | Glow reads as emission, not as bright paint |
 | Two-layer contact shadow | Sits the figure on the ground instead of stickering it on |
 | Dark stage pool behind the figure | A skin whose palette matches its rarity hue keeps its edges |
+| Chamfered corners on bevelled parts (§6.5) | A stack of hard rectangles is the loudest placeholder signal there is |
 
 ---
 
@@ -433,5 +492,6 @@ emits — never per-item artwork, which is why adding a cosmetic never means dra
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |
+| 1.3.0 | 2026-09-14 | [OWNER] Fidelity pass on the signature four and Scrapjaw: costume layering vocabulary (§6.4), bevelled parts (§6.5), revised silhouettes (§7.3), salvage haft, per-tool head scale and a rebuilt Scrapjaw head (§11). IDs, rarity and pricing unchanged. |
 | 1.2.0 | 2026-09-14 | [OWNER] Emissive structural pattern exception (§6.3): the accent limit is a real limit again, with one narrow declared and measured exception. Rarity is explicitly not a qualifying reason. Voidmarrow approved under it. |
 | 1.1.0 | 2026-09-14 | Operator-kit features and self-lit parts (§6.1, §6.2); the signature four (§7.3); harvesting tools as rigs, with Scrapjaw (§11); render fidelity model (§12). Accent rule amended to count non-glow parts only (§9.5). |

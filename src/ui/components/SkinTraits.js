@@ -35,7 +35,8 @@ const HEAD_LABELS = Object.freeze({
 });
 
 const HAFT_LABELS = Object.freeze({
-  straight: 'Straight haft', wrapped: 'Wrapped haft', pipe: 'Pipe haft'
+  straight: 'Straight haft', wrapped: 'Wrapped haft', pipe: 'Pipe haft',
+  salvage: 'Salvage haft'
 });
 
 /**

@@ -196,7 +196,24 @@ function drawPart(ctx, part, colour, view) {
       g.addColorStop(0.82, colour.front);
       g.addColorStop(1, colour.side);
       ctx.fillStyle = g;
-      ctx.fillRect(-w / 2, top, w, height);
+      if (part.bevel) {
+        // Chamfered corners (§6.5). Proportional to the smaller side and capped, so a
+        // long thin strap keeps its length instead of turning into a lozenge.
+        const cut = Math.min(w, height) * 0.22;
+        ctx.beginPath();
+        ctx.moveTo(-w / 2 + cut, top);
+        ctx.lineTo(w / 2 - cut, top);
+        ctx.lineTo(w / 2, top + cut);
+        ctx.lineTo(w / 2, top + height - cut);
+        ctx.lineTo(w / 2 - cut, top + height);
+        ctx.lineTo(-w / 2 + cut, top + height);
+        ctx.lineTo(-w / 2, top + height - cut);
+        ctx.lineTo(-w / 2, top + cut);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(-w / 2, top, w, height);
+      }
       // A narrow lit strip down the left edge, matching the light direction used above.
       ctx.fillStyle = rgbaOf('#ffffff', 0.07);
       ctx.fillRect(-w / 2, top, Math.max(1, w * 0.12), height);

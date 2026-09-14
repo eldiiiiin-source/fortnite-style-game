@@ -45,6 +45,32 @@ function unitWedge() {
 }
 UNIT.wedge = unitWedge();
 
+/**
+ * A chamfered unit box — SKIN_SPEC §6.5. Corners cut on all three axes so a stack of
+ * plates reads as machined parts rather than as a pile of rectangles.
+ */
+function unitBevelBox() {
+  const g = new THREE.BoxGeometry(1, 1, 1, 2, 2, 2);
+  const pos = g.attributes.position;
+  const cut = 0.34;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    // Pull the eight corner vertices in along every axis; edge and face vertices stay.
+    const corner = Math.abs(x) > 0.49 && Math.abs(y) > 0.49 && Math.abs(z) > 0.49;
+    if (corner) {
+      pos.setX(i, x * (1 - cut));
+      pos.setY(i, y * (1 - cut));
+      pos.setZ(i, z * (1 - cut));
+    }
+  }
+  pos.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+UNIT.bevelBox = unitBevelBox();
+
 export class CharacterView {
   constructor() {
     this.group = new THREE.Group();
@@ -123,7 +149,8 @@ export class CharacterView {
 
   _build(parts, owner, parent, idPrefix) {
     for (const part of parts) {
-      const mesh = new THREE.Mesh(UNIT[part.shape] ?? UNIT.box, this._material(owner, part));
+      const geometry = part.bevel ? UNIT.bevelBox : (UNIT[part.shape] ?? UNIT.box);
+      const mesh = new THREE.Mesh(geometry, this._material(owner, part));
       applyPartTransform(mesh, part, this.ownedGeometries);
       mesh.castShadow = true;
       mesh.receiveShadow = false;

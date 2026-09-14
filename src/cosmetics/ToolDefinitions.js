@@ -27,7 +27,8 @@ export const HeadForm = Object.freeze({
 export const HaftStyle = Object.freeze({
   STRAIGHT: 'straight',
   WRAPPED: 'wrapped',
-  PIPE: 'pipe'
+  PIPE: 'pipe',
+  SALVAGE: 'salvage'
 });
 
 const tool = (id, def) => Object.freeze({
@@ -40,6 +41,11 @@ const tool = (id, def) => Object.freeze({
   haft: def.haft ?? HaftStyle.STRAIGHT,
   /** Bolts, rivets and hanging scrap — the details that make a form read as built. */
   details: Object.freeze([...(def.details ?? [])].sort()),
+  /**
+   * Head size against the roster default (SKIN_SPEC §11.3.1). A VIEW value only: reach,
+   * damage and swing rate live in PICKAXE and are identical for every tool.
+   */
+  headScale: def.headScale ?? 1,
   palette: Object.freeze({ ...def.palette }),
   pricePosition: def.pricePosition ?? 0.5,
   set: def.set ?? null,
@@ -53,7 +59,9 @@ export const ToolDetail = Object.freeze({
   COUNTERWEIGHT: 'counterweight',
   SPIKES: 'spikes',
   RAGS: 'rags',
-  GLOW_EDGE: 'glowEdge'
+  GLOW_EDGE: 'glowEdge',
+  WELD_PLATES: 'weldPlates',
+  CHAIN_LASH: 'chainLash'
 });
 
 const D = ToolDetail;
@@ -155,8 +163,12 @@ export const TOOLS = Object.freeze([
     theme: 'Welded scrap',
     description: 'Four things that failed at their old jobs, welded into one that does not.',
     head: HeadForm.SCRAP,
-    haft: HaftStyle.PIPE,
-    details: [D.BOLTS, D.BINDING, D.SPIKES, D.RAGS, D.COUNTERWEIGHT],
+    haft: HaftStyle.SALVAGE,
+    details: [D.BOLTS, D.BINDING, D.SPIKES, D.RAGS, D.COUNTERWEIGHT,
+      D.WELD_PLATES, D.CHAIN_LASH],
+    // Oversized on purpose: a signature tool has to carry a shop card that a common one
+    // does not (§11.3.1). View only — reach and damage are unchanged.
+    headScale: 1.34,
     pricePosition: 0.75,
     tags: ['scrap'],
     palette: {

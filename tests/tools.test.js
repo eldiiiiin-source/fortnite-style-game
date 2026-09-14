@@ -211,3 +211,67 @@ describe('SKIN_SPEC §11.6 — tools reach the shop and the locker', () => {
     }
   });
 });
+
+describe('SKIN_SPEC §11.3.1, §11.5 — the 1.3.0 Scrapjaw pass', () => {
+  it('runs Scrapjaw at a larger head scale than the roster default', () => {
+    const scrapjaw = getTool('pickaxe_scrapjaw');
+    expect(scrapjaw.headScale).toBeGreaterThan(1);
+    for (const other of TOOLS.filter((t) => t.id !== 'pickaxe_scrapjaw')) {
+      expect(other.headScale, other.id).toBe(1);
+    }
+  });
+
+  it('keeps head scale a view value with no gameplay reach', () => {
+    const before = JSON.stringify(PICKAXE);
+    buildToolRig(getTool('pickaxe_scrapjaw'));
+    expect(JSON.stringify(PICKAXE)).toBe(before);
+    // Scaling the head must not scale the haft: the tool still fits the same hand.
+    expect(toolMetrics(2).length).toBe(toolMetrics(1).length);
+    expect(toolMetrics(2).gripToHead).toBe(toolMetrics(1).gripToHead);
+    expect(toolMetrics(2).headWidth).toBeCloseTo(toolMetrics(1).headWidth * 2, 6);
+  });
+
+  it('gives the cutting edge and the counter-spike genuinely different shapes (§11.5)', () => {
+    const parts = buildToolRig(getTool('pickaxe_scrapjaw')).parts;
+    const edge = parts.find((p) => p.id === 'cuttingEdge');
+    const spike = parts.find((p) => p.id === 'counterSpike');
+    expect(edge, 'cuttingEdge').toBeTruthy();
+    expect(spike, 'counterSpike').toBeTruthy();
+    expect(edge.shape).not.toBe(spike.shape);
+    // …and they oppose each other across the haft.
+    expect(Math.sign(edge.pos.x)).not.toBe(Math.sign(spike.pos.x));
+  });
+
+  it('layers the head: plates, rivets and lashings, not one slab', () => {
+    const parts = buildToolRig(getTool('pickaxe_scrapjaw')).parts;
+    expect(parts.filter((p) => p.id.startsWith('weldPlate')).length).toBeGreaterThanOrEqual(3);
+    expect(parts.filter((p) => p.id.startsWith('weldRivet')).length).toBeGreaterThanOrEqual(3);
+    expect(parts.filter((p) => p.id.startsWith('chainLink')).length).toBeGreaterThanOrEqual(3);
+    expect(parts.filter((p) => p.bevel).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('leaves the other six tools untouched by the pass', () => {
+    // Part counts frozen from before: this pass was scoped to Scrapjaw alone.
+    const BEFORE = {
+      pickaxe_standard: 7, pickaxe_quarry: 7, pickaxe_splitleaf: 9,
+      pickaxe_tidebreak: 9, pickaxe_emberfall: 9, pickaxe_lumen: 8
+    };
+    for (const [id, count] of Object.entries(BEFORE)) {
+      expect(buildToolRig(getTool(id)).parts.length, id).toBe(count);
+    }
+  });
+
+  it('preserves save compatibility for every tool ID, rarity and price (§9.13)', () => {
+    const BEFORE = {
+      pickaxe_standard: ['common', 300], pickaxe_quarry: ['common', 450],
+      pickaxe_splitleaf: ['uncommon', 650], pickaxe_tidebreak: ['rare', 900],
+      pickaxe_emberfall: ['epic', 1500], pickaxe_lumen: ['legendary', 2200],
+      pickaxe_scrapjaw: ['epic', 1650]
+    };
+    for (const [id, [rarity, price]] of Object.entries(BEFORE)) {
+      const item = getCosmetic(id);
+      expect(item.rarity, `${id} rarity`).toBe(rarity);
+      expect(item.price, `${id} price`).toBe(price);
+    }
+  });
+});

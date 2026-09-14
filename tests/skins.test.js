@@ -436,3 +436,76 @@ describe('SKIN_SPEC §6.3 — the emissive structural pattern exception stays na
     expect({ ...MOVEMENT }).toEqual(before);
   });
 });
+
+describe('SKIN_SPEC §9.12, §9.13 — the 1.3.0 fidelity pass', () => {
+  const SIGNATURE = ['outfit_vexbloom', 'outfit_goldspar', 'outfit_voidmarrow', 'outfit_coalcrest'];
+
+  it('gives each of the signature four real costume layering (§9.12)', () => {
+    for (const id of SIGNATURE) {
+      const rig = buildCharacterRig(getSkin(id));
+      // Density: a premium outfit carries markedly more geometry than a base one.
+      expect(rig.parts.length, `${id} part count`).toBeGreaterThanOrEqual(55);
+      expect(rig.parts.filter((p) => p.bevel).length, `${id} bevelled parts`)
+        .toBeGreaterThanOrEqual(10);
+      expect(getSkin(id).features.length, `${id} features`).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('keeps the signature four denser than every base-roster outfit', () => {
+    const base = SKINS.filter((s) => !SIGNATURE.includes(s.id))
+      .map((s) => buildCharacterRig(s).parts.length);
+    const worstSignature = Math.min(
+      ...SIGNATURE.map((id) => buildCharacterRig(getSkin(id)).parts.length)
+    );
+    expect(worstSignature).toBeGreaterThan(Math.max(...base));
+  });
+
+  it('carries at least one asymmetric element per signature outfit', () => {
+    for (const id of SIGNATURE) {
+      const rig = buildCharacterRig(getSkin(id));
+      // An element with no mirrored twin at -x is what breaks the mannequin read.
+      const asymmetric = rig.parts.some((p) => Math.abs(p.pos.x) > 1e-6 && !rig.parts.some(
+        (q) => q.id !== p.id
+          && Math.abs(q.pos.x + p.pos.x) < 1e-6
+          && Math.abs(q.pos.y - p.pos.y) < 1e-6
+      ));
+      expect(asymmetric, `${id} is perfectly mirrored`).toBe(true);
+    }
+  });
+
+  it('keeps silhouette variety across the four (§9.12)', () => {
+    const width = (id) => {
+      const b = rigBounds(buildCharacterRig(getSkin(id)));
+      return b.maxX - b.minX;
+    };
+    // The heavy operator must stay clearly the broadest of the set.
+    const coalcrest = width('outfit_coalcrest');
+    for (const id of SIGNATURE.filter((s) => s !== 'outfit_coalcrest')) {
+      expect(coalcrest, `${id} is as broad as Coalcrest`).toBeGreaterThan(width(id) * 1.15);
+    }
+  });
+
+  it('preserves save compatibility: IDs, rarity and price are untouched (§9.13)', () => {
+    // Frozen expectations from before the pass. A profile saved then must still resolve.
+    const BEFORE = {
+      outfit_vexbloom: { rarity: 'epic', price: 1700 },
+      outfit_goldspar: { rarity: 'legendary', price: 2450 },
+      outfit_voidmarrow: { rarity: 'legendary', price: 2450 },
+      outfit_coalcrest: { rarity: 'epic', price: 1700 }
+    };
+    for (const [id, expected] of Object.entries(BEFORE)) {
+      const item = getCosmetic(id);
+      expect(item, id).not.toBeNull();
+      expect(item.rarity, `${id} rarity`).toBe(expected.rarity);
+      expect(item.price, `${id} price`).toBe(expected.price);
+      expect(getSkin(id), `${id} skin`).not.toBeNull();
+    }
+  });
+
+  it('still satisfies the accent rule after the pass', () => {
+    for (const id of SIGNATURE) {
+      const skin = getSkin(id);
+      expect(evaluateAccentRule(skin, buildCharacterRig(skin)).ok, id).toBe(true);
+    }
+  });
+});
