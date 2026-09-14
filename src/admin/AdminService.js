@@ -82,12 +82,24 @@ export class AdminService {
     }
   }
 
-  /** Keep only small scalars so the log cannot retain large object graphs. */
-  _summarise(payload) {
+  /**
+   * Keep only small scalars so the log cannot retain large object graphs.
+   *
+   * Descends a bounded depth rather than one level: most events carry their detail one
+   * object down (`piece:placed` emits `{ piece }`, and the piece's cell one deeper), so a
+   * single-level filter logged an empty payload for exactly the events worth reading.
+   * Only scalars are ever retained, at any depth, so nothing here holds a live reference.
+   */
+  _summarise(payload, depth = ADMIN.eventLogDepth) {
     if (!payload || typeof payload !== 'object') return payload;
     const out = {};
     for (const [k, v] of Object.entries(payload)) {
-      if (v === null || ['number', 'string', 'boolean'].includes(typeof v)) out[k] = v;
+      if (v === null || ['number', 'string', 'boolean'].includes(typeof v)) {
+        out[k] = v;
+      } else if (depth > 0 && typeof v === 'object' && !Array.isArray(v)) {
+        const nested = this._summarise(v, depth - 1);
+        if (Object.keys(nested).length > 0) out[k] = nested;
+      }
     }
     return out;
   }

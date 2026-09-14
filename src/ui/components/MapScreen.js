@@ -18,14 +18,22 @@ export class MapScreen {
       style: {
         position: 'fixed', inset: '0', display: 'none', zIndex: '40',
         background: 'rgba(6,9,14,.88)', backdropFilter: 'blur(3px)',
-        alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '14px'
+        alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '14px',
+        // The overlay lives in the HUD root, a sibling of `.ui-root`, so it inherits
+        // nothing from the theme's text rule. Both are set here or the map renders
+        // black-on-black.
+        font: '400 14px \"Segoe UI\", system-ui, -apple-system, sans-serif',
+        color: 'var(--text)'
       }
     });
     this.legend = el('div', {
       style: { display: 'flex', gap: '22px', fontSize: '11.5px', color: 'var(--text-dim)' }
     });
     this.info = el('div', {
-      style: { fontSize: '13px', fontWeight: '800', letterSpacing: '.1em', textTransform: 'uppercase' }
+      style: {
+        fontSize: '13px', fontWeight: '800', letterSpacing: '.1em',
+        textTransform: 'uppercase', color: 'var(--text)'
+      }
     });
   }
 

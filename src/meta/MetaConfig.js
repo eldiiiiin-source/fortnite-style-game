@@ -211,6 +211,9 @@ export const ADMIN = Object.freeze({
   aiDebugKey: 'F10',
   performanceKey: 'F11',
   eventLogLimit: 100,
+  // How far the event log walks into a payload before giving up (§15). Two levels
+  // reach a piece's cell, which is the deepest detail worth logging.
+  eventLogDepth: 2,
   quickBotCounts: [1, 5, 10, 25]
 });
 
