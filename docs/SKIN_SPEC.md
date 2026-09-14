@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
-| Version | 1.1.0 |
+| Version | 1.2.0 |
 | Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
 | Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
 | Implementation | Complete |
@@ -182,6 +182,49 @@ draws a bloom behind it. This is a **material flag, not a rarity effect**: a com
 may use it and a legendary one need not. It never changes how visible a player is to
 another player at gameplay distance.
 
+### 6.3 Emissive structural pattern exception
+
+**[OWNER] Approved 2026-09-14, with restriction.**
+
+A cosmetic may exceed the normal accent percentage (§9.5) **only** when all of the
+following hold:
+
+1. The emissive pattern is a core **silhouette / readability** feature — the pattern is
+   what the character *is*, not decoration applied to it.
+2. The non-emissive base remains **visually dominant** enough to preserve character form.
+3. The emissive material does **not significantly increase visibility** in normal gameplay.
+4. The effect does **not obscure body proportions**.
+5. The effect creates **no gameplay advantage**.
+6. The exception is **explicitly declared** in the cosmetic definition.
+
+> **Legendary rarity alone is NOT sufficient reason to exceed the normal accent limit.**
+> Rarity is not an input to this rule. A legendary skin with ordinary decorative accenting
+> is refused exactly as a common one would be, and a common skin meeting every condition
+> is admitted.
+
+The conditions are enforced as measurements in `cosmetics/CosmeticRules.js`, not as
+review prose, because a narrow exception is easy to widen by accident:
+
+| Condition | Measurement | Threshold |
+| --- | --- | --- |
+| Declared | `skin.accentException === 'emissiveStructuralPattern'` | required |
+| Structural, not decorative | accent share of **non-emissive** parts | ≤ 25% |
+| Pattern exists | emissive part count | ≥ 1 |
+| Base visually dominant | non-emissive share of frontal **area** | ≥ 65% |
+| Base visually dominant | non-emissive share of parts | ≥ 55% |
+| No visibility gain | emissive share of frontal area | ≤ 25% |
+| Reads against its base | `primary` luminance | ≤ 0.30 |
+| Proportions preserved | every body region retains non-emissive geometry | required |
+
+Frontal **area** is used rather than part count wherever the condition is about what the
+player sees: four thin rib strips and four broad plates are the same count and nothing
+like the same amount of glow on screen.
+
+A declaration on a cosmetic that does not need it is also a failure — it would let the
+exception spread by habit.
+
+**Approved under this exception: `outfit_voidmarrow` only.**
+
 Features compose: a skin is its build plus three to six features. **No two skins in the
 roster may share the same (build, feature-set) pair** — asserted by test (§9).
 
@@ -287,13 +330,15 @@ the world — it would be a gameplay tell and hand paying players an advantage, 
    different hitbox — the capsule constants are identical for every equipped skin.
 3. Every skin's (build, features) pair is unique.
 4. Every skin declares all seven palette roles, with valid hex colours.
-5. `accent` never paints more than a quarter of a rig's **non-glow** parts.
+5. `accent` never paints more than a quarter of a rig's parts, **unless** the cosmetic
+   declares and satisfies the emissive structural pattern exception (§6.3). Every skin is
+   evaluated by `evaluateAccentRule`, and an undeclared skin over the limit fails —
+   whatever its rarity.
 
-   > Amended in 1.1.0. The original rule counted every accent part, which a deliberate
-   > glow pattern breaks by construction — Voidmarrow's ribs, spine and limb bones are
-   > accent-coloured and are the entire design. The rule's intent is that a loud colour
-   > must not sprawl across the base garment, and that still holds: glow parts are thin
-   > strips over a dark base, and §9.10 checks that base is actually dark.
+   > Amended in 1.2.0 at the owner's direction. 1.1.0 blanket-excluded glow parts from the
+   > count, which was too broad: it would have admitted any future skin that sprayed
+   > emissive accenting around, on rarity or on taste. The limit is now a real limit with
+   > one narrow, declared, measured exception.
 
 6. Rig construction is deterministic — the same skin yields an identical part list.
 7. Every rarity tier in the roster is represented and matches the §7.3 distribution.
@@ -301,6 +346,9 @@ the world — it would be a gameplay tell and hand paying players an advantage, 
 9. All rig dimensions scale with the build module: doubling `standHeight` doubles the rig.
 10. A skin using `bonePattern` keeps a dark base — its `primary` luminance stays low
     enough that the glow reads against it.
+10a. No skin exceeds the accent limit without a declared §6.3 exception, and a declared
+    exception that fails any §6.3 condition is a failure. Rarity never appears in the
+    decision: a synthetic legendary over the limit is refused.
 11. Every harvesting tool builds a rig with a haft and a head, and no tool carries a
     gameplay field.
 
@@ -385,4 +433,5 @@ emits — never per-item artwork, which is why adding a cosmetic never means dra
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |
+| 1.2.0 | 2026-09-14 | [OWNER] Emissive structural pattern exception (§6.3): the accent limit is a real limit again, with one narrow declared and measured exception. Rarity is explicitly not a qualifying reason. Voidmarrow approved under it. |
 | 1.1.0 | 2026-09-14 | Operator-kit features and self-lit parts (§6.1, §6.2); the signature four (§7.3); harvesting tools as rigs, with Scrapjaw (§11); render fidelity model (§12). Accent rule amended to count non-glow parts only (§9.5). |

@@ -170,7 +170,10 @@ export class CharacterView {
    */
   place(position, yaw, height = CHARACTER.height) {
     this.group.position.set(position.x, position.y, position.z);
-    this.group.rotation.y = yaw;
+    // + PI because the two conventions disagree: the rig faces +Z (SKIN_SPEC §3.2) while
+    // a player at yaw 0 looks down -Z (PlayerCamera.lookDirection). Without the half turn
+    // the character faces the camera in third person and moonwalks when running forward.
+    this.group.rotation.y = yaw + Math.PI;
     this.group.scale.y = height / CHARACTER.height;
   }
 

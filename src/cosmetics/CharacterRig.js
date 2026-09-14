@@ -634,9 +634,15 @@ const FEATURE_BUILDERS = {
     parts.push(box('collarBone', BodyRegion.TORSO, 'accent',
       v(m.shoulderWidth * 0.9, m.torsoHeight * 0.08, m.torsoDepth * 1.07),
       v(0, m.shoulderY - m.torsoHeight * 0.08, 0), null, true));
+    // A solid backing behind the spine. Without it the back carries emissive geometry and
+    // nothing else, so from behind the glow floats with no body under it — the figure
+    // loses its proportions exactly where §6.3 says it must not.
+    parts.push(box('spineBacking', BodyRegion.BACK, 'secondary',
+      v(m.shoulderWidth * 0.34, m.torsoHeight * 0.94, m.torsoDepth * 0.16),
+      v(0, m.hipTop + m.torsoHeight * 0.5, -m.torsoDepth * 0.54)));
     parts.push(box('spine', BodyRegion.BACK, 'accent',
       v(m.shoulderWidth * 0.14, m.torsoHeight * 0.9, m.torsoDepth * 0.12),
-      v(0, m.hipTop + m.torsoHeight * 0.5, -m.torsoDepth * 0.56), null, true));
+      v(0, m.hipTop + m.torsoHeight * 0.5, -m.torsoDepth * 0.58), null, true));
 
     for (const side of [-1, 1]) {
       const armTag = side < 0 ? BodyRegion.ARM_L : BodyRegion.ARM_R;

@@ -14,6 +14,9 @@ import {
 } from '../src/cosmetics/CharacterRig.js';
 import { CHARACTER, MOVEMENT, RARITY_ORDER } from '../src/core/Config.js';
 import {
+  evaluateAccentRule, ACCENT_LIMIT, EMISSIVE_STRUCTURAL_PATTERN, EXCEPTION_LIMITS
+} from '../src/cosmetics/CosmeticRules.js';
+import {
   cosmeticsByCategory, CosmeticCategory, getCosmetic, catalogCounts
 } from '../src/meta/CosmeticCatalog.js';
 import { ProfileManager } from '../src/meta/ProfileManager.js';
@@ -118,12 +121,28 @@ describe('SKIN_SPEC §4 — palette roles', () => {
     }
   });
 
-  it('keeps the accent to a small share of the NON-GLOW parts (§9.5)', () => {
+  it('keeps every skin inside the accent budget or a valid §6.3 exception (§9.5)', () => {
     for (const skin of SKINS) {
-      const rig = buildCharacterRig(skin);
-      const solid = rig.parts.filter((p) => !p.glow);
-      const accented = solid.filter((p) => p.role === 'accent').length;
-      expect(accented / solid.length, skin.id).toBeLessThanOrEqual(0.25);
+      const result = evaluateAccentRule(skin, buildCharacterRig(skin));
+      expect(result.failures, `${skin.id}: ${result.failures.join('; ')}`).toEqual([]);
+      expect(result.ok, skin.id).toBe(true);
+    }
+  });
+
+  it('lets only Voidmarrow exceed the limit, and only by declaring §6.3', () => {
+    const exceeding = SKINS.filter(
+      (s) => evaluateAccentRule(s, buildCharacterRig(s)).exceeds
+    );
+    expect(exceeding.map((s) => s.id)).toEqual(['outfit_voidmarrow']);
+    for (const skin of exceeding) {
+      expect(skin.accentException, skin.id).toBe(EMISSIVE_STRUCTURAL_PATTERN);
+    }
+  });
+
+  it('declares the exception on no skin that does not need it', () => {
+    for (const skin of SKINS) {
+      if (skin.accentException === null) continue;
+      expect(evaluateAccentRule(skin, buildCharacterRig(skin)).exceeds, skin.id).toBe(true);
     }
   });
 
@@ -326,5 +345,94 @@ describe('SKIN_SPEC §10 — every skin reaches the shop, the locker and a match
     const b = memoryProfile(storage);
     expect(b.equippedId('outfit')).toBe('outfit_hexwilt');
     expect(buildCharacterRig(b.equippedId('outfit')).skin.id).toBe('outfit_hexwilt');
+  });
+});
+
+describe('SKIN_SPEC §6.3 — the emissive structural pattern exception stays narrow', () => {
+  const rigOf = (skin) => buildCharacterRig(skin);
+
+  it('refuses an over-budget skin that does not declare the exception', () => {
+    const undeclared = { ...getSkin('outfit_voidmarrow'), accentException: null };
+    const result = evaluateAccentRule(undeclared, rigOf(undeclared));
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toContain('without declaring');
+  });
+
+  it('refuses it on rarity alone — legendary buys nothing', () => {
+    // Same geometry, same excess, no declaration, top rarity. Still refused.
+    const legendary = {
+      ...getSkin('outfit_voidmarrow'), rarity: 'legendary', accentException: null
+    };
+    expect(evaluateAccentRule(legendary, rigOf(legendary)).ok).toBe(false);
+
+    // And the rule reaches an identical verdict for a common skin with the same geometry,
+    // which is the proof that rarity is not an input at all.
+    const common = { ...legendary, rarity: 'common' };
+    const a = evaluateAccentRule(legendary, rigOf(legendary));
+    const b = evaluateAccentRule(common, rigOf(common));
+    expect(b.ok).toBe(a.ok);
+    expect(b.failures).toEqual(a.failures);
+  });
+
+  it('refuses a declared skin whose excess is ordinary decoration, not a pattern', () => {
+    // Strip the glow flags: the accent parts are now plain paint, so the exception's
+    // "structural, not decorative" condition must reject it.
+    const skin = getSkin('outfit_voidmarrow');
+    const rig = rigOf(skin);
+    const decorative = { ...rig, parts: rig.parts.map((p) => ({ ...p, glow: false })) };
+    const result = evaluateAccentRule(skin, decorative);
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toMatch(/decoration|no emissive parts/);
+  });
+
+  it('refuses a declared skin whose base is too light to carry a glow', () => {
+    const base = getSkin('outfit_voidmarrow');
+    const skin = { ...base, palette: { ...base.palette, primary: '#eef2f7' } };
+    const result = evaluateAccentRule(skin, rigOf(skin));
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toContain('too light');
+  });
+
+  it('refuses a declared skin whose glow swallows the figure', () => {
+    // Every part emissive: the base can no longer dominate, and the wearer would light
+    // up in normal play.
+    const skin = getSkin('outfit_voidmarrow');
+    const rig = rigOf(skin);
+    const allGlow = { ...rig, parts: rig.parts.map((p) => ({ ...p, glow: true })) };
+    const result = evaluateAccentRule(skin, allGlow);
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toMatch(/dominate|visible/);
+  });
+
+  it('refuses a declared skin that erases a body region behind its glow', () => {
+    const skin = getSkin('outfit_voidmarrow');
+    const rig = rigOf(skin);
+    // Make every torso part emissive: the torso keeps no solid geometry, so from the
+    // front its proportions are gone.
+    const hollow = {
+      ...rig,
+      parts: rig.parts.map((p) => (p.tag === 'torso' ? { ...p, glow: true } : p))
+    };
+    const result = evaluateAccentRule(skin, hollow);
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toContain('emissive-only');
+  });
+
+  it('keeps Voidmarrow approved, comfortably inside every condition', () => {
+    const skin = getSkin('outfit_voidmarrow');
+    const { ok, exceeds, declared, metrics } = evaluateAccentRule(skin, rigOf(skin));
+    expect({ ok, exceeds, declared }).toEqual({ ok: true, exceeds: true, declared: true });
+    expect(metrics.accentShare).toBeGreaterThan(ACCENT_LIMIT);
+    expect(metrics.solidAccentShare).toBeLessThanOrEqual(ACCENT_LIMIT);
+    expect(metrics.emissiveArea).toBeLessThanOrEqual(EXCEPTION_LIMITS.maxEmissiveArea);
+    expect(metrics.baseArea).toBeGreaterThanOrEqual(EXCEPTION_LIMITS.minBaseArea);
+    expect(metrics.baseParts).toBeGreaterThanOrEqual(EXCEPTION_LIMITS.minBaseParts);
+    expect(metrics.baseLuminance).toBeLessThanOrEqual(EXCEPTION_LIMITS.maxBaseLuminance);
+  });
+
+  it('changes no gameplay value — the exception is presentation only', () => {
+    const before = { ...MOVEMENT };
+    for (const skin of SKINS) evaluateAccentRule(skin, buildCharacterRig(skin));
+    expect({ ...MOVEMENT }).toEqual(before);
   });
 });

@@ -13,6 +13,8 @@
  * than by review.
  */
 
+import { EMISSIVE_STRUCTURAL_PATTERN } from './CosmeticRules.js';
+
 /** Build archetypes — SKIN_SPEC §5. Keys match CHARACTER.builds in Config. */
 export const Build = Object.freeze({
   LEAN: 'lean',
@@ -83,6 +85,13 @@ const skin = (id, def) => Object.freeze({
   build: def.build,
   features: Object.freeze([...def.features].sort()),
   palette: Object.freeze({ ...def.palette }),
+  /**
+   * SKIN_SPEC §6.3. Set only to claim the emissive structural pattern exception to the
+   * accent budget, and only where every condition in `CosmeticRules.js` is met. Rarity
+   * grants nothing here: a legendary skin with ordinary decorative accenting is refused
+   * exactly as a common one would be.
+   */
+  accentException: def.accentException ?? null,
   /** Position within the rarity's price band, 0..1 (ITEM_SHOP_SPEC §9.3). */
   pricePosition: def.pricePosition ?? 0.5,
   set: def.set ?? null,
@@ -373,6 +382,10 @@ const SIGNATURE = [
     features: [F.SKULL_MASK, F.BONE_PATTERN, F.THIGH_RIG, F.KNEE_PADS, F.COMBAT_BOOTS],
     pricePosition: 0.95,
     tags: ['spooky', 'glow'],
+    // The skeletal pattern IS this character's silhouette and readability, not decoration
+    // applied to it — the one case §6.3 admits. Declared here, and checked against every
+    // condition by `evaluateAccentRule`.
+    accentException: EMISSIVE_STRUCTURAL_PATTERN,
     palette: {
       // Near-black base so the self-lit bones are the only thing the eye lands on.
       primary: '#14161c', secondary: '#1d2028', accent: '#a24cff',
