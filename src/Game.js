@@ -202,6 +202,16 @@ export class Game {
     }
   }
 
+  /**
+   * How far through a pickaxe swing the avatar is, 0 at the strike and 1 once recovered.
+   *
+   * Presentation only — a read of the pickaxe's own cooldown, so the visual swing rides the
+   * gameplay swing rate and can never alter it. 1 (idle) whenever the pickaxe is not out.
+   */
+  get pickaxeSwingProgress() {
+    return this.inventory.pickaxeEquipped ? this.pickaxe.swingProgress : 1;
+  }
+
   _wireCombatEvents() {
     // Bots damage their target directly through takeDamage; the event is for audio and
     // the admin event log only.

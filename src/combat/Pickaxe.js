@@ -19,6 +19,23 @@ export class Pickaxe {
     return this.cooldown <= 0;
   }
 
+  /** Mid-swing, for presentation only. */
+  get swinging() {
+    return this.cooldown > 0;
+  }
+
+  /**
+   * How far through the current swing, 0 at the strike and 1 once recovered.
+   *
+   * A READ of the existing cooldown, not a second clock: the view animates against this so
+   * gameplay stays authoritative and the animation can never drift from the swing rate.
+   * Damage lands the instant `swing()` is called, i.e. at progress 0 (§14).
+   */
+  get swingProgress() {
+    if (this.cooldown <= 0) return 1;
+    return Math.min(1, Math.max(0, 1 - this.cooldown / PICKAXE.swingInterval));
+  }
+
   /**
    * Swing. The swing cue fires immediately (§12.2 — no delayed feedback chain); the
    * impact resolves on the same tick against whatever the aim ray hits.

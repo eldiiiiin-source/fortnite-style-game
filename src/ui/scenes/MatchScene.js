@@ -100,7 +100,7 @@ export class MatchScene extends Scene {
 
     this.renderer.syncCamera(game.camera);
     // Hidden while falling: the descent controls the position and the body would clip.
-    this.renderer.updateAvatar(game.player, !game.inDropPhase);
+    this.renderer.updateAvatar(game.player, !game.inDropPhase, game.pickaxeSwingProgress);
     this.renderer.updateStreaming(game.player.position);
     this.renderer.syncBuildGrid(game.grid);
 

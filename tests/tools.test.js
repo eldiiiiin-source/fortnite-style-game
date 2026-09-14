@@ -9,8 +9,10 @@ import {
   TOOLS, getTool, toolOrFallback, toolRarityCounts, HeadForm, HaftStyle, ToolDetail
 } from '../src/cosmetics/ToolDefinitions.js';
 import {
-  buildToolRig, toolMetrics, carryTransform, ToolRegion, SUPPORTED_HEADS, SUPPORTED_TOOL_DETAILS
+  buildToolRig, toolMetrics, carryTransform, swingPose, swungPoint, SwingPhase, SWING_REST,
+  ToolRegion, SUPPORTED_HEADS, SUPPORTED_TOOL_DETAILS
 } from '../src/cosmetics/ToolRig.js';
+import { Pickaxe } from '../src/combat/Pickaxe.js';
 import { buildCharacterRig } from '../src/cosmetics/CharacterRig.js';
 import { SKINS } from '../src/cosmetics/SkinDefinitions.js';
 import { rigBounds, partColour } from '../src/cosmetics/RigPrimitives.js';
@@ -363,6 +365,141 @@ describe('SKIN_SPEC §11.6 — the carry pose', () => {
       const ratio = value / base;
       expect(ratio).toBeGreaterThan(0);
       expect(ratio).toBeLessThan(1);
+    }
+  });
+});
+
+describe('SKIN_SPEC §11.7 — the swing animation', () => {
+  const FRAMES = [0, 0.07, 0.14, 0.21, 0.32, 0.40, 0.46, 0.60, 0.80, 0.95, 1];
+
+  const rigs = SKINS.map((skin) => ({ skin, metrics: buildCharacterRig(skin).metrics }));
+  const combinations = rigs.flatMap(({ skin, metrics }) => TOOLS.map((tool) => ({
+    label: `${skin.id} + ${tool.id}`,
+    metrics,
+    headScale: tool.headScale ?? 1,
+    tm: toolMetrics(tool.headScale ?? 1)
+  })));
+
+  it('follows the gameplay swing state rather than a clock of its own', () => {
+    // The animation reads Pickaxe.swingProgress, which is derived from the swing cooldown.
+    // If that mapping ever drifted, the visual swing would drift from the swing rate.
+    const pickaxe = new Pickaxe(null);
+    expect(pickaxe.swinging).toBe(false);
+    expect(pickaxe.swingProgress).toBe(1);
+
+    pickaxe.swing({ aimRay: { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } }, collision: null });
+    expect(pickaxe.swinging).toBe(true);
+    expect(pickaxe.swingProgress).toBe(0);
+
+    // Progress tracks elapsed time over the interval, and reaches rest exactly as the
+    // cooldown expires — never before, never after.
+    pickaxe.update(PICKAXE.swingInterval / 2);
+    expect(pickaxe.swingProgress).toBeCloseTo(0.5, 6);
+    expect(pickaxe.swinging).toBe(true);
+
+    pickaxe.update(PICKAXE.swingInterval / 2);
+    expect(pickaxe.swinging).toBe(false);
+    expect(pickaxe.swingProgress).toBe(1);
+    expect(pickaxe.canSwing).toBe(true);
+  });
+
+  it('moves through wind-up, strike and recovery in order', () => {
+    expect(swingPose(0.05).phase).toBe(SwingPhase.WINDUP);
+    expect(swingPose(0.25).phase).toBe(SwingPhase.STRIKE);
+    expect(swingPose(0.40).phase).toBe(SwingPhase.RECOVER);
+    expect(swingPose(0.90).phase).toBe(SwingPhase.CARRY);
+
+    // The head rises for the wind-up, then drives down and forward through the strike.
+    const m = rigs[0].metrics;
+    const head = (p) => swungPoint(m, 1, p, toolMetrics(1).gripToHead);
+    const carry = head(1);
+    const windup = head(0.14);
+    const strike = head(0.32);
+    expect(windup.y, 'wind-up does not raise the tool').toBeGreaterThan(carry.y + 1);
+    expect(strike.y, 'strike does not come back down').toBeLessThan(windup.y - 0.8);
+    expect(strike.z, 'strike does not drive forward').toBeGreaterThan(carry.z);
+  });
+
+  it('returns exactly to the carry pose, so repeated swings never snap', () => {
+    // Both ends of the interval must land on the approved carry pose to the bit, or a held
+    // swing would jolt on every repeat.
+    for (const { label, metrics, headScale, tm } of combinations) {
+      const carry = carryTransform(metrics, headScale);
+      for (const p of [0, 1]) {
+        const pose = swingPose(p);
+        expect(pose.arm.x, `${label} arm at p=${p}`).toBe(0);
+        expect(pose.arm.y, `${label} arm at p=${p}`).toBe(0);
+        expect(pose.arm.z, `${label} arm at p=${p}`).toBe(0);
+        expect(pose.toolPitch, `${label} tool pitch at p=${p}`).toBe(0);
+
+        const head = swungPoint(metrics, headScale, p, tm.gripToHead);
+        expect(head.x, `${label} head x at p=${p}`).toBeCloseTo(carry.head.x, 9);
+        expect(head.y, `${label} head y at p=${p}`).toBeCloseTo(carry.head.y, 9);
+        expect(head.z, `${label} head z at p=${p}`).toBeCloseTo(carry.head.z, 9);
+      }
+    }
+    // And the rest pose the view falls back to is the same thing.
+    expect(SWING_REST.arm).toEqual({ x: 0, y: 0, z: 0 });
+    expect(SWING_REST.toolPitch).toBe(0);
+  });
+
+  it('produces no NaN transform at any progress, including junk input', () => {
+    const { metrics } = rigs[0];
+    const inputs = [...FRAMES, -1, 2, 1.0001, -0.0001, NaN, Infinity, -Infinity, undefined];
+    for (const p of inputs) {
+      const pose = swingPose(p);
+      for (const [k, v] of Object.entries({ ...pose.arm, tool: pose.toolPitch, progress: pose.progress })) {
+        expect(Number.isFinite(v), `swingPose(${p}).${k}`).toBe(true);
+      }
+      // Out-of-range progress clamps rather than extrapolating into a broken pose.
+      expect(pose.progress).toBeGreaterThanOrEqual(0);
+      expect(pose.progress).toBeLessThanOrEqual(1);
+
+      const head = swungPoint(metrics, 1, p, toolMetrics(1).gripToHead);
+      for (const [axis, v] of Object.entries(head)) {
+        expect(Number.isFinite(v), `swungPoint(${p}).${axis}`).toBe(true);
+      }
+    }
+  });
+
+  it('never drives the tool through the torso or the head', () => {
+    for (const { label, metrics: m, headScale, tm } of combinations) {
+      for (const p of FRAMES) {
+        for (const along of [tm.gripToHead, 0, -tm.gripToButt]) {
+          const q = swungPoint(m, headScale, p, along);
+
+          const inTorso = Math.abs(q.x) < m.torsoWidth / 2
+            && Math.abs(q.z) < m.torsoDepth / 2
+            && q.y > m.hipTop && q.y < m.shoulderY;
+          expect(inTorso, `${label} at p=${p} passes through the torso`).toBe(false);
+
+          // A raised tool passes ABOVE the head, which is fine; through it is not.
+          const reach = m.headRadius + tm.headHeight / 2;
+          const inHead = Math.hypot(q.x, q.z) < reach && Math.abs(q.y - m.headY) < reach;
+          expect(inHead, `${label} at p=${p} passes through the head`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('never puts the tool head below the ground, recovery included', () => {
+    for (const { label, metrics, headScale, tm } of combinations) {
+      for (const p of FRAMES) {
+        const head = swungPoint(metrics, headScale, p, tm.gripToHead);
+        expect(head.y - tm.headHeight / 2, `${label} head below ground at p=${p}`)
+          .toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('keeps the tool in front of the character throughout, never back toward the camera', () => {
+    // The camera trails the character, so a swing that reaches behind fills the view with
+    // the tool. The whole arc stays forward of the body.
+    for (const { label, metrics, headScale, tm } of combinations) {
+      for (const p of FRAMES) {
+        const head = swungPoint(metrics, headScale, p, tm.gripToHead);
+        expect(head.z, `${label} head swings behind the character at p=${p}`).toBeGreaterThan(0);
+      }
     }
   });
 });

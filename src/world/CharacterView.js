@@ -10,10 +10,10 @@
  */
 import * as THREE from 'three';
 import {
-  buildCharacterRig, partColour, PartShape
+  buildCharacterRig, partColour, PartShape, BodyRegion
 } from '../cosmetics/CharacterRig.js';
 import { skinOrFallback } from '../cosmetics/SkinDefinitions.js';
-import { buildToolRig, carryTransform } from '../cosmetics/ToolRig.js';
+import { buildToolRig, carryTransform, swingPose, SWING_REST } from '../cosmetics/ToolRig.js';
 import { toolOrFallback } from '../cosmetics/ToolDefinitions.js';
 import { CHARACTER } from '../core/Config.js';
 
@@ -80,11 +80,21 @@ export class CharacterView {
     this.parts = new Map();       // part id -> Mesh
     this.ownedGeometries = [];    // per-part geometries this view must dispose
 
-    // The held harvesting tool, parented to the character so it inherits the crouch
-    // squash and the yaw without a second transform to keep in sync.
+    // The right arm and whatever it holds, pivoted at the SHOULDER so one rotation swings
+    // arm and tool together — a tool animated apart from the arm holding it slides out of
+    // the hand. Parented to the character, so it inherits the crouch squash and the yaw.
+    this.armGroup = new THREE.Group();
+    this.group.add(this.armGroup);
+
     this.toolGroup = new THREE.Group();
-    this.group.add(this.toolGroup);
+    this.armGroup.add(this.toolGroup);
     this.tool = null;
+
+    // Carry pose in rig space, and the tool's own carry rotation. The swing is applied as
+    // an offset from these, so progress 0 and progress 1 land back on the approved pose.
+    this.shoulder = { x: 0, y: 0, z: 0 };
+    this.carry = null;
+    this.swing = SWING_REST;
   }
 
   get object3D() {
@@ -104,6 +114,13 @@ export class CharacterView {
     this._clear();
     this.skin = skin;
     this.rig = buildCharacterRig(skin);
+
+    // Seat the shoulder pivot BEFORE building, so every arm mesh is rebased onto it as it
+    // is created. Doing it afterwards only works when the pivot moved, which silently skips
+    // any skin whose shoulder happens to sit where the last one's did.
+    this.shoulder = { x: this.rig.metrics.armX, y: this.rig.metrics.shoulderY, z: 0 };
+    this.armGroup.position.set(this.shoulder.x, this.shoulder.y, this.shoulder.z);
+
     this._build(this.rig.parts, skin, this.group, '');
 
     // Materials are shared per view and were just disposed, so the held tool is rebuilt
@@ -146,9 +163,40 @@ export class CharacterView {
   _placeToolInHand() {
     const m = this.rig?.metrics;
     if (!m) return;
-    const { position, rotation } = carryTransform(m, this.tool?.headScale ?? 1);
-    this.toolGroup.position.set(position.x, position.y, position.z);
-    this.toolGroup.rotation.set(rotation.x, rotation.y, rotation.z);
+
+    this.carry = carryTransform(m, this.tool?.headScale ?? 1);
+    this._applySwing();
+  }
+
+  /**
+   * Set how far through a swing the tool is (SKIN_SPEC §11.7).
+   *
+   * `progress` is `Pickaxe.swingProgress` — a read of the gameplay cooldown. Pass 1, or
+   * nothing, for the idle carry pose.
+   */
+  setSwingProgress(progress = 1) {
+    this.swing = progress >= 1 || !Number.isFinite(progress) ? SWING_REST : swingPose(progress);
+    this._applySwing();
+  }
+
+  /**
+   * Lay the swing over the carry pose.
+   *
+   * At rest the offsets are all zero, so the tool lands on exactly the transform
+   * `carryTransform` returns — the approved carry pose, unmodified.
+   */
+  _applySwing() {
+    if (!this.carry) return;
+    const { position, rotation } = this.carry;
+    const s = this.swing;
+
+    this.armGroup.rotation.set(s.arm.x, s.arm.y, s.arm.z);
+    this.toolGroup.position.set(
+      position.x - this.shoulder.x,
+      position.y - this.shoulder.y,
+      position.z - this.shoulder.z
+    );
+    this.toolGroup.rotation.set(rotation.x + s.toolPitch, rotation.y, rotation.z);
   }
 
   _build(parts, owner, parent, idPrefix) {
@@ -158,7 +206,19 @@ export class CharacterView {
       applyPartTransform(mesh, part, this.ownedGeometries);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
-      parent.add(mesh);
+      // Everything on the right arm — the limb itself and any cosmetic pad or bracer on it
+      // — rides the arm group, so a swing takes the whole sleeve with it. Parts are built in
+      // RIG space, so rebase onto the pivot to leave them exactly where they were.
+      if (parent === this.group && part.region === BodyRegion.ARM_R) {
+        mesh.position.set(
+          mesh.position.x - this.shoulder.x,
+          mesh.position.y - this.shoulder.y,
+          mesh.position.z - this.shoulder.z
+        );
+        this.armGroup.add(mesh);
+      } else {
+        parent.add(mesh);
+      }
       this.parts.set(idPrefix + part.id, mesh);
     }
   }

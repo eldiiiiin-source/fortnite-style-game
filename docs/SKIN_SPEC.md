@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — from the project owner's skin-system brief, 2026-09-14** |
-| Version | 1.3.1 |
+| Version | 1.4.0 |
 | Covers | Character rig, skin definitions, palette roles, silhouette features, the skin roster, harvesting tools, rarity presentation, render fidelity, and where cosmetics render |
 | Companion | `docs/ITEM_SHOP_SPEC.md` (ownership, shop, locker), `docs/MASTER_SPEC.md` (player dimensions) |
 | Implementation | Complete |
@@ -494,6 +494,35 @@ levels off rather than dragging through the floor.
 There is no swing animation in the view layer. This pose is the only transform a tool
 receives, and swing timing, damage and reach are gameplay values that none of it touches.
 
+### 11.7 The swing animation [OWNER-derived]
+
+Swinging a tool must read as a swing. The carry pose (§11.6) is the rest state; a strike
+lifts the tool overhead, drives it down and forward through the target, and settles back.
+
+**Gameplay is authoritative. The animation never is.** It is driven by
+`Pickaxe.swingProgress` — a READ of the swing cooldown, normalised to 0 at the strike and
+1 once recovered. There is no second clock, so the animation cannot change the swing rate,
+the damage, the range or the hit test. Damage resolves the instant the swing is called, at
+progress 0; the visual strike peaks a little later, because a wind-up with no wind-up in it
+reads as a twitch. That lead is presentation, and it moves no gameplay value.
+
+The arm rotates about the SHOULDER and the tool rides in its hand, so one joint carries
+both. Animating a tool apart from the arm holding it slides it out of the hand.
+
+Constraints, held for every outfit carrying every tool, at every frame:
+
+- The arc starts and ends on the carry pose EXACTLY, so repeated swings loop without a snap
+  and dropping the pickaxe mid-swing returns to rest immediately.
+- The tool stays in front of the character throughout. The camera trails the player, so a
+  swing that reaches behind fills the view with the tool.
+- It passes above the head, never through it, and never through the torso.
+- The head never goes below the ground, recovery included.
+- No transform is ever NaN, for any progress, including out-of-range and junk input.
+
+One wind-up needs roughly -2.15 rad at the shoulder to carry the head overhead: a tool
+hanging head-down only reaches shoulder height at -1.2, which reads as reaching forward
+rather than as a swing.
+
 ## 12. Render fidelity
 
 Flat fills read as placeholder art. One lighting model is applied to whatever any rig
@@ -516,6 +545,7 @@ emits — never per-item artwork, which is why adding a cosmetic never means dra
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4.0 | 2026-09-14 | Adds §11.7: a visual swing animation for harvesting tools — overhead wind-up, strike through the target, settle back to the carry pose — driven by `Pickaxe.swingProgress`, a read of the gameplay cooldown, so no gameplay timing, damage, range or hit test changes. |
 | 1.3.1 | 2026-09-14 | §11.6: harvesting tools are carried in the hand at the side, angled down and forward, instead of tipped up behind the shoulder where they lay across the character's silhouette. Pose authored as a direction and clamped per rig. |
 | 1.0.0 | 2026-09-14 | Initial specification from the owner's skin-system brief: rig, palette roles, builds, features, sixteen-outfit roster, rarity presentation. |
 | 1.3.0 | 2026-09-14 | [OWNER] Fidelity pass on the signature four and Scrapjaw: costume layering vocabulary (§6.4), bevelled parts (§6.5), revised silhouettes (§7.3), salvage haft, per-tool head scale and a rebuilt Scrapjaw head (§11). IDs, rarity and pricing unchanged. |

@@ -748,12 +748,15 @@ export class Renderer {
    * @param {object} player  PlayerController
    * @param {boolean} visible  hidden during freefall, where the descent owns the view
    */
-  updateAvatar(player, visible = true) {
+  updateAvatar(player, visible = true, swingProgress = 1) {
     if (!this.character) return;
     this.character.visible = visible;
     if (!visible) return;
     // Crouching squashes the character exactly as it squashes the capsule.
     this.character.place(player.position, player.yaw, player.height);
+    // Swing progress comes from the pickaxe cooldown, so the animation rides the gameplay
+    // swing rate rather than a clock of its own.
+    this.character.setSwingProgress(swingProgress);
   }
 
   syncCamera(playerCamera) {

@@ -114,6 +114,122 @@ export function carryTransform(metrics, headScale = 1) {
   };
 }
 
+/* ── swing animation ─────────────────────────────────────────────────────── */
+
+/** Named stretches of the swing, for the view and for tests to talk about. */
+export const SwingPhase = Object.freeze({
+  CARRY: 'carry',
+  WINDUP: 'windup',
+  STRIKE: 'strike',
+  RECOVER: 'recover'
+});
+
+/**
+ * Keyframes of the swing, in normalised gameplay progress (SKIN_SPEC §11.7).
+ *
+ * `arm` rotates the whole right arm about the SHOULDER; positive X swings the hand
+ * backward, negative swings it forward and then up and over. The wind-up needs about
+ * -2.15 rad to carry the head OVERHEAD: a tool hanging head-down from the hand only
+ * reaches shoulder height at -1.2, which reads as reaching forward, not as a swing. `tool` is an extra pitch of the tool in the
+ * hand — the wrist cocking back and whipping through, which is what makes the head lead
+ * the strike instead of trailing the arm rigidly.
+ *
+ * The first and last frames are the carry pose exactly, so a swing begins and ends where
+ * the approved idle pose sits and repeated swings loop without a snap.
+ */
+const SWING_KEYS = [
+  { at: 0.00, armX: 0.00, armZ: 0.00, tool: 0.00, phase: SwingPhase.CARRY },
+  { at: 0.14, armX: -2.15, armZ: -0.16, tool: 0.50, phase: SwingPhase.WINDUP },
+  { at: 0.32, armX: -0.30, armZ: 0.10, tool: -0.70, phase: SwingPhase.STRIKE },
+  { at: 0.46, armX: 0.12, armZ: 0.05, tool: -0.35, phase: SwingPhase.RECOVER },
+  { at: 1.00, armX: 0.00, armZ: 0.00, tool: 0.00, phase: SwingPhase.CARRY }
+];
+
+/** Smoothstep between two keys — no corner at a keyframe, so the arc reads as one motion. */
+const ease = (t) => t * t * (3 - 2 * t);
+
+/**
+ * The visual swing pose at a normalised gameplay progress (SKIN_SPEC §11.7).
+ *
+ * Pure: angles only, no metrics, no side effects, testable in Node.
+ *
+ * DRIVEN BY GAMEPLAY, NEVER DRIVING IT. `progress` is `Pickaxe.swingProgress`, which is a
+ * read of the swing cooldown. There is no second clock, so the animation cannot change the
+ * swing rate, the damage timing, the range or the hit test — gameplay resolves the hit at
+ * progress 0 and the animation is presentation laid over the same interval.
+ */
+export function swingPose(progress) {
+  const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 1;
+
+  let lo = SWING_KEYS[0];
+  let hi = SWING_KEYS[SWING_KEYS.length - 1];
+  for (let i = 0; i < SWING_KEYS.length - 1; i++) {
+    if (p >= SWING_KEYS[i].at && p <= SWING_KEYS[i + 1].at) {
+      lo = SWING_KEYS[i];
+      hi = SWING_KEYS[i + 1];
+      break;
+    }
+  }
+
+  const span = hi.at - lo.at;
+  const t = span > 0 ? ease((p - lo.at) / span) : 0;
+  const mix = (a, b) => a + (b - a) * t;
+
+  return {
+    progress: p,
+    // The phase being moved INTO, so a frame reports the motion it is part of.
+    phase: hi.phase,
+    arm: { x: mix(lo.armX, hi.armX), y: 0, z: mix(lo.armZ, hi.armZ) },
+    toolPitch: mix(lo.tool, hi.tool)
+  };
+}
+
+/** The rest pose: what the rig looks like when no swing is in flight. */
+export const SWING_REST = Object.freeze({
+  progress: 1, phase: SwingPhase.CARRY, arm: { x: 0, y: 0, z: 0 }, toolPitch: 0
+});
+
+/**
+ * Where a point `along` the haft ends up in rig space, at a given swing progress.
+ *
+ * `along` is measured from the grip: `+gripToHead` is the striking head, `-gripToButt` the
+ * butt end. Positive Y is up the haft, as everywhere else in this file.
+ *
+ * MIRRORS THE VIEW'S TRANSFORM CHAIN exactly — arm group pivoted at the shoulder, tool
+ * group inside it, both Euler XYZ — so a test of this is a test of what renders. The view
+ * owns no geometry of its own; it feeds these same numbers to three.js.
+ */
+export function swungPoint(metrics, headScale, progress, along) {
+  const carry = carryTransform(metrics, headScale);
+  const swing = swingPose(progress);
+  const pivot = { x: metrics.armX, y: metrics.shoulderY, z: 0 };
+
+  // Euler XYZ: v' = RX * RY * RZ * v. RY is always zero here.
+  const rotate = (v, e) => {
+    const cz = Math.cos(e.z);
+    const sz = Math.sin(e.z);
+    const zx = v.x * cz - v.y * sz;
+    const zy = v.x * sz + v.y * cz;
+    const cx = Math.cos(e.x);
+    const sx = Math.sin(e.x);
+    return { x: zx, y: zy * cx - v.z * sx, z: zy * sx + v.z * cx };
+  };
+
+  // Up the haft, in the tool's own frame, with the wrist pitch laid over the carry rotation.
+  const alongTool = rotate({ x: 0, y: along, z: 0 },
+    { x: carry.rotation.x + swing.toolPitch, y: 0, z: carry.rotation.z });
+
+  // Into arm space (the carry position is rig space, so rebase it onto the pivot).
+  const inArm = {
+    x: carry.position.x - pivot.x + alongTool.x,
+    y: carry.position.y - pivot.y + alongTool.y,
+    z: carry.position.z - pivot.z + alongTool.z
+  };
+
+  const swung = rotate(inArm, swing.arm);
+  return { x: swung.x + pivot.x, y: swung.y + pivot.y, z: swung.z + pivot.z };
+}
+
 /* ── haft ────────────────────────────────────────────────────────────────── */
 
 const HAFT_BUILDERS = {
