@@ -11,9 +11,11 @@
  */
 import * as THREE from 'three';
 import {
-  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA, MOVEMENT
+  TILE, WALL_H, BUDGET, MATERIALS, MATERIAL_ORDER, WORLD, CAMERA
 } from '../core/Config.js';
 import { solidBoxes, rampSections, coneQuadrants, cellOrigin } from '../building/PieceGeometry.js';
+import { CharacterView } from './CharacterView.js';
+import { DEFAULT_EQUIPPED } from '../meta/CosmeticCatalog.js';
 
 /** Storm wall height — tall enough to read from the ground at any build height. */
 const STORM_WALL_HEIGHT = WALL_H * 30;
@@ -465,56 +467,21 @@ export class Renderer {
    * changes the character. Dimensions derive from the movement capsule, never literals,
    * so the avatar always matches the collision shape it represents.
    */
+  /** SKIN_SPEC §10 — the in-match character, built from the equipped skin's rig. */
   _setupAvatar() {
-    const r = MOVEMENT.capsuleRadius;
-    const h = MOVEMENT.standHeight;
-
-    this.avatar = new THREE.Group();
-    this.avatarMaterials = {
-      body: new THREE.MeshLambertMaterial({ color: 0x6b7280 }),
-      trim: new THREE.MeshLambertMaterial({ color: 0xcbd5e1 })
-    };
-
-    const torso = new THREE.Mesh(
-      new THREE.BoxGeometry(r * 2.1, h * 0.42, r * 1.3), this.avatarMaterials.body
-    );
-    torso.position.y = h * 0.62;
-    torso.castShadow = true;
-    this.avatar.add(torso);
-
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(r * 0.62, 16, 12), this.avatarMaterials.trim
-    );
-    head.position.y = h * 0.9;
-    head.castShadow = true;
-    this.avatar.add(head);
-
-    for (const side of [-1, 1]) {
-      const leg = new THREE.Mesh(
-        new THREE.BoxGeometry(r * 0.78, h * 0.42, r * 0.9), this.avatarMaterials.body
-      );
-      leg.position.set(side * r * 0.5, h * 0.21, 0);
-      leg.castShadow = true;
-      this.avatar.add(leg);
-
-      const arm = new THREE.Mesh(
-        new THREE.BoxGeometry(r * 0.55, h * 0.36, r * 0.75), this.avatarMaterials.trim
-      );
-      arm.position.set(side * r * 1.4, h * 0.62, 0);
-      arm.castShadow = true;
-      this.avatar.add(arm);
-    }
-
-    this.avatarGroup = this.avatar;
+    this.character = new CharacterView();
+    this.character.setSkin(DEFAULT_EQUIPPED.outfit);
+    this.avatar = this.character.object3D;
     this.scene.add(this.avatar);
   }
 
-  /** Apply the equipped outfit's palette to the avatar. */
+  /**
+   * Apply the equipped outfit. Takes the catalog cosmetic; its id is the skin id, and an
+   * unknown or missing one falls back to a valid skin rather than leaving the player
+   * invisible (SKIN_SPEC §7).
+   */
   setAvatarCosmetics(outfit) {
-    if (!outfit?.preview?.palette) return;
-    const [dark, light] = outfit.preview.palette;
-    this.avatarMaterials.body.color.set(dark);
-    this.avatarMaterials.trim.color.set(light);
+    this.character.setSkin(outfit?.id ?? DEFAULT_EQUIPPED.outfit);
   }
 
   /**
@@ -522,14 +489,11 @@ export class Renderer {
    * @param {boolean} visible  hidden during freefall, where the descent owns the view
    */
   updateAvatar(player, visible = true) {
-    if (!this.avatar) return;
-    this.avatar.visible = visible;
+    if (!this.character) return;
+    this.character.visible = visible;
     if (!visible) return;
-
-    this.avatar.position.set(player.position.x, player.position.y, player.position.z);
-    this.avatar.rotation.y = player.yaw;
-    // Crouching squashes the avatar exactly as it squashes the capsule.
-    this.avatar.scale.y = player.height / MOVEMENT.standHeight;
+    // Crouching squashes the character exactly as it squashes the capsule.
+    this.character.place(player.position, player.yaw, player.height);
   }
 
   syncCamera(playerCamera) {

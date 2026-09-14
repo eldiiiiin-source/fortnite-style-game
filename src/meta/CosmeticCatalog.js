@@ -12,6 +12,7 @@
  * than merely stated.
  */
 import { PRICE_BANDS } from './MetaConfig.js';
+import { SKINS } from '../cosmetics/SkinDefinitions.js';
 
 export const CosmeticCategory = Object.freeze({
   OUTFIT: 'outfit',
@@ -78,17 +79,21 @@ const B = CosmeticCategory.BACK_ACCESSORY;
 const E = CosmeticCategory.EMOTE;
 const W = CosmeticCategory.WRAP;
 
-/** 8 outfits */
-const OUTFITS = [
-  item('outfit_recruit', 'Recruit', O, 'common', 'Standard issue field gear.', 0.2, { palette: ['#6b7280', '#9ca3af'] }),
-  item('outfit_drifter', 'Drifter', O, 'common', 'Travelled light, travelled far.', 0.6, { palette: ['#7c6f5a', '#b9a88a'] }),
-  item('outfit_signal', 'Signal', O, 'uncommon', 'High-visibility for low-visibility work.', 0.3, { palette: ['#2f9e6e', '#7ee3b0'] }),
-  item('outfit_tidewatch', 'Tidewatch', O, 'uncommon', 'Coastal patrol colours.', 0.8, { palette: ['#2b6f8f', '#79c3dd'] }),
-  item('outfit_ironleaf', 'Ironleaf', O, 'rare', 'Forest plating, quiet step.', 0.4, { palette: ['#3f5a3a', '#8fb083'], set: 'Wildline' }),
-  item('outfit_emberkin', 'Emberkin', O, 'rare', 'Warmth worn on the outside.', 0.9, { palette: ['#8f3f2b', '#e0875f'] }),
-  item('outfit_nightvane', 'Nightvane', O, 'epic', 'Built for the last circle.', 0.5, { palette: ['#2e2a4a', '#8b7fd4'] }),
-  item('outfit_aurelian', 'Aurelian', O, 'legendary', 'Gilded, and earned.', 0.7, { palette: ['#8a6a1f', '#f0cf72'] })
-];
+/**
+ * Outfits are generated from the skin roster (SKIN_SPEC §7) rather than declared here.
+ * The roster owns a skin's appearance — build, palette roles, silhouette features — and
+ * this catalog owns its commerce: price, shop eligibility, ownership. Declaring outfits in
+ * both places is exactly how the two drift apart, so only one place declares them.
+ */
+const OUTFITS = SKINS.map((skin) => item(
+  skin.id, skin.name, O, skin.rarity, skin.description, skin.pricePosition, {
+    // `palette` stays a two-colour pair for the generic preview paths; anything drawing a
+    // character reads the full role map off the skin itself.
+    palette: [skin.palette.primary, skin.palette.secondary],
+    set: skin.set,
+    tags: [...skin.tags, skin.theme.toLowerCase()]
+  }
+));
 
 /** 6 harvesting tools */
 const PICKAXES = [

@@ -21,7 +21,8 @@ export class LobbyScene extends Scene {
     super(SceneName.LOBBY, app);
     this.ui = ui;
     this.root = el('div.screen');
-    this.characterPreview = new CosmeticPreview({ size: 300 });
+    // The lobby's centre column is the character's stage — it earns the space (§8.1).
+    this.characterPreview = new CosmeticPreview({ size: 430 });
   }
 
   enter() {

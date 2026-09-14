@@ -1,0 +1,301 @@
+/**
+ * skins.test.js — SKIN_SPEC §9 required tests.
+ *
+ * These assert against numbers quoted from the spec, so a spec change that the code does
+ * not follow shows up here as a failure (CLAUDE.md: "Tests assert against numbers quoted
+ * from the specs").
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  SKINS, PALETTE_ROLES, getSkin, skinOrFallback, skinRarityCounts, Build
+} from '../src/cosmetics/SkinDefinitions.js';
+import {
+  buildCharacterRig, buildMetrics, rigBounds, partColour, BodyRegion, SUPPORTED_FEATURES
+} from '../src/cosmetics/CharacterRig.js';
+import { CHARACTER, MOVEMENT, RARITY_ORDER } from '../src/core/Config.js';
+import {
+  cosmeticsByCategory, CosmeticCategory, getCosmetic, catalogCounts
+} from '../src/meta/CosmeticCatalog.js';
+import { ProfileManager } from '../src/meta/ProfileManager.js';
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** An in-memory storage stand-in, as the other meta tests use. */
+function makeStorage() {
+  const store = new Map();
+  return {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, v),
+    removeItem: (k) => store.delete(k)
+  };
+}
+
+function memoryProfile(storage = makeStorage()) {
+  const p = new ProfileManager({ storage });
+  p.load();
+  return p;
+}
+
+describe('SKIN_SPEC §7 — the roster', () => {
+  it('carries sixteen outfits', () => {
+    expect(SKINS.length).toBe(16);
+    expect(catalogCounts().outfit).toBe(16);
+  });
+
+  it('matches the §7.3 rarity distribution', () => {
+    expect(skinRarityCounts()).toEqual({
+      common: 3, uncommon: 4, rare: 4, epic: 3, legendary: 2
+    });
+  });
+
+  it('uses every rarity tier', () => {
+    const seen = new Set(SKINS.map((s) => s.rarity));
+    for (const tier of RARITY_ORDER) expect(seen.has(tier)).toBe(true);
+  });
+
+  it('keeps the founding eight IDs intact — profiles store them', () => {
+    for (const id of [
+      'outfit_recruit', 'outfit_drifter', 'outfit_signal', 'outfit_tidewatch',
+      'outfit_ironleaf', 'outfit_emberkin', 'outfit_nightvane', 'outfit_aurelian'
+    ]) {
+      expect(getSkin(id)).not.toBeNull();
+    }
+  });
+
+  it('gives every skin a unique id and name', () => {
+    expect(new Set(SKINS.map((s) => s.id)).size).toBe(SKINS.length);
+    expect(new Set(SKINS.map((s) => s.name)).size).toBe(SKINS.length);
+  });
+
+  it('only uses features the rig can build', () => {
+    for (const skin of SKINS) {
+      for (const feature of skin.features) {
+        expect(SUPPORTED_FEATURES).toContain(feature);
+      }
+    }
+  });
+
+  it('only uses declared build archetypes', () => {
+    const builds = new Set(Object.values(Build));
+    for (const skin of SKINS) expect(builds.has(skin.build)).toBe(true);
+  });
+
+  it('covers every build archetype across the roster', () => {
+    const used = new Set(SKINS.map((s) => s.build));
+    for (const build of Object.values(Build)) expect(used.has(build)).toBe(true);
+  });
+});
+
+describe('SKIN_SPEC §4 — palette roles', () => {
+  it('declares all seven roles as valid hex, on every skin', () => {
+    for (const skin of SKINS) {
+      for (const role of PALETTE_ROLES) {
+        expect(skin.palette[role], `${skin.id}.${role}`).toMatch(HEX);
+      }
+    }
+  });
+
+  it('never reuses the primary as the accent — an accent that is the primary is not one', () => {
+    for (const skin of SKINS) {
+      expect(skin.palette.accent.toLowerCase()).not.toBe(skin.palette.primary.toLowerCase());
+    }
+  });
+
+  it('keeps the accent to a small share of the parts (§9.5)', () => {
+    for (const skin of SKINS) {
+      const rig = buildCharacterRig(skin);
+      const accented = rig.parts.filter((p) => p.role === 'accent').length;
+      expect(accented / rig.parts.length, skin.id).toBeLessThanOrEqual(0.25);
+    }
+  });
+
+  it('resolves every part to a colour', () => {
+    for (const skin of SKINS) {
+      for (const part of buildCharacterRig(skin).parts) {
+        expect(partColour(skin, part), `${skin.id}:${part.id}`).toMatch(HEX);
+      }
+    }
+  });
+});
+
+describe('SKIN_SPEC §6 — silhouettes', () => {
+  it('gives every skin a unique (build, features) pair (§9.3)', () => {
+    const seen = new Map();
+    for (const skin of SKINS) {
+      const key = `${skin.build}|${skin.features.join(',')}`;
+      expect(seen.has(key), `${skin.id} duplicates ${seen.get(key)}`).toBe(false);
+      seen.set(key, skin.id);
+    }
+  });
+
+  it('gives every skin at least one part in every body region (§9.1)', () => {
+    for (const skin of SKINS) {
+      const regions = new Set(buildCharacterRig(skin).parts.map((p) => p.tag));
+      for (const region of [
+        BodyRegion.HEAD, BodyRegion.TORSO, BodyRegion.HIPS,
+        BodyRegion.ARM_L, BodyRegion.ARM_R, BodyRegion.LEG_L, BodyRegion.LEG_R
+      ]) {
+        expect(regions.has(region), `${skin.id} missing ${region}`).toBe(true);
+      }
+    }
+  });
+
+  it('produces measurably different silhouettes between builds', () => {
+    const widthOf = (build) => {
+      const b = rigBounds(buildCharacterRig(SKINS.find((s) => s.build === build)));
+      return b.maxX - b.minX;
+    };
+    // A heavy frame is broader than a lean one. If these ever converge, the build
+    // archetypes have stopped doing their job.
+    expect(widthOf(Build.HEAVY)).toBeGreaterThan(widthOf(Build.LEAN) * 1.15);
+  });
+
+  it('builds a bigger head for a mascot than for an athletic frame', () => {
+    expect(buildMetrics(Build.STOUT).headRadius)
+      .toBeGreaterThan(buildMetrics(Build.ATHLETIC).headRadius * 1.4);
+  });
+
+  it('is deterministic — the same skin yields an identical part list (§9.6)', () => {
+    for (const skin of SKINS) {
+      const a = buildCharacterRig(skin);
+      const b = buildCharacterRig(skin);
+      expect(JSON.stringify(b.parts)).toBe(JSON.stringify(a.parts));
+    }
+  });
+
+  it('orders parts back-to-front so a 2D consumer can paint in array order', () => {
+    for (const skin of SKINS) {
+      const zs = buildCharacterRig(skin).parts.map((p) => p.pos.z);
+      for (let i = 1; i < zs.length; i++) expect(zs[i]).toBeGreaterThanOrEqual(zs[i - 1]);
+    }
+  });
+
+  it('skips an unknown feature rather than throwing — a future roster must not break a save', () => {
+    const future = { ...SKINS[0], id: 'outfit_future', features: ['somethingNotYetInvented'] };
+    expect(() => buildCharacterRig(future)).not.toThrow();
+    expect(buildCharacterRig(future).parts.length).toBeGreaterThan(0);
+  });
+
+  it('falls back to a real skin for an unknown id rather than rendering nothing', () => {
+    expect(skinOrFallback('outfit_does_not_exist').id).toBe(SKINS[0].id);
+    expect(buildCharacterRig('outfit_does_not_exist').parts.length).toBeGreaterThan(0);
+  });
+});
+
+describe('SKIN_SPEC §3.2 — dimensions derive from the build module', () => {
+  it('stands every build at exactly the capsule height before cosmetic overhang', () => {
+    for (const build of Object.values(Build)) {
+      const m = buildMetrics(build);
+      // Head crown is pinned to standing height; hats and hair sit above it by design.
+      expect(m.headY + m.headRadius).toBeCloseTo(MOVEMENT.standHeight, 6);
+    }
+  });
+
+  it('keeps every skin within a hand-span of the capsule height', () => {
+    for (const skin of SKINS) {
+      const b = rigBounds(buildCharacterRig(skin));
+      expect(b.minY).toBeGreaterThanOrEqual(0);
+      // Overhang exists (antennae, tufts) but must never read as a different height class.
+      expect(b.maxY).toBeLessThan(MOVEMENT.standHeight * 1.3);
+    }
+  });
+
+  it('scales with CHARACTER rather than carrying absolute lengths (§9.9)', () => {
+    const m = buildMetrics(Build.ATHLETIC);
+    expect(m.headRadius).toBeCloseTo(CHARACTER.headRadius, 6);
+    expect(m.torsoWidth).toBeCloseTo(CHARACTER.torsoWidth, 6);
+    expect(m.hipTop).toBeCloseTo(CHARACTER.hipY, 6);
+    // CHARACTER itself derives from the capsule, so the whole chain traces to the module.
+    expect(CHARACTER.height).toBe(MOVEMENT.standHeight);
+    expect(CHARACTER.radius).toBe(MOVEMENT.capsuleRadius);
+  });
+
+  it('keeps the torso roughly within the collision capsule', () => {
+    for (const skin of SKINS) {
+      const m = buildMetrics(skin.build);
+      // The character should fill its capsule without wildly exceeding it — a body far
+      // wider than its own hitbox reads as broken to anyone shooting at it.
+      expect(m.torsoWidth).toBeLessThan(MOVEMENT.capsuleRadius * 3);
+    }
+  });
+});
+
+describe('SKIN_SPEC §3.4 — cosmetics never touch collision', () => {
+  it('leaves the capsule identical for every equipped skin (§9.2)', () => {
+    const profile = memoryProfile();
+    const before = {
+      radius: MOVEMENT.capsuleRadius,
+      stand: MOVEMENT.standHeight,
+      crouch: MOVEMENT.crouchHeight,
+      step: MOVEMENT.stepHeight
+    };
+
+    for (const skin of SKINS) {
+      if (!profile.owns(skin.id)) profile.grantCosmetic(skin.id);
+      expect(profile.equip(skin.id)).toBe(true);
+      buildCharacterRig(skin);
+
+      expect(MOVEMENT.capsuleRadius).toBe(before.radius);
+      expect(MOVEMENT.standHeight).toBe(before.stand);
+      expect(MOVEMENT.crouchHeight).toBe(before.crouch);
+      expect(MOVEMENT.stepHeight).toBe(before.step);
+    }
+  });
+
+  it('exposes no gameplay field on a skin, so there is nowhere to hide a buff', () => {
+    const banned = [
+      'damage', 'health', 'shield', 'speed', 'hitbox', 'armor', 'armour',
+      'multiplier', 'range', 'fireRate', 'collision'
+    ];
+    for (const skin of SKINS) {
+      for (const key of Object.keys(skin)) {
+        expect(banned, `${skin.id}.${key}`).not.toContain(key);
+      }
+    }
+  });
+});
+
+describe('SKIN_SPEC §10 — every skin reaches the shop, the locker and a match', () => {
+  it('lists every roster skin as a purchasable outfit (§9.8)', () => {
+    const outfits = cosmeticsByCategory(CosmeticCategory.OUTFIT);
+    expect(outfits.length).toBe(SKINS.length);
+    for (const skin of SKINS) {
+      const item = getCosmetic(skin.id);
+      expect(item, skin.id).not.toBeNull();
+      expect(item.category).toBe(CosmeticCategory.OUTFIT);
+      expect(item.rarity).toBe(skin.rarity);
+      expect(item.price).toBeGreaterThan(0);
+      expect(item.enabled).toBe(true);
+    }
+  });
+
+  it('carries the skin palette through to the catalog preview', () => {
+    for (const skin of SKINS) {
+      expect(getCosmetic(skin.id).preview.palette).toEqual([
+        skin.palette.primary, skin.palette.secondary
+      ]);
+    }
+  });
+
+  it('can be granted and equipped through the normal profile path', () => {
+    const profile = memoryProfile();
+    for (const skin of SKINS) {
+      // Starter skins are already owned on a fresh profile; granting those is a no-op.
+      if (!profile.owns(skin.id)) expect(profile.grantCosmetic(skin.id)).toBe(true);
+      expect(profile.owns(skin.id)).toBe(true);
+      expect(profile.equip(skin.id)).toBe(true);
+      expect(profile.equippedId('outfit')).toBe(skin.id);
+    }
+  });
+
+  it('survives a save and reload with the equipped skin intact', () => {
+    const storage = makeStorage();
+    const a = memoryProfile(storage);
+    a.grantCosmetic('outfit_hexwilt');
+    a.equip('outfit_hexwilt');
+
+    const b = memoryProfile(storage);
+    expect(b.equippedId('outfit')).toBe('outfit_hexwilt');
+    expect(buildCharacterRig(b.equippedId('outfit')).skin.id).toBe('outfit_hexwilt');
+  });
+});

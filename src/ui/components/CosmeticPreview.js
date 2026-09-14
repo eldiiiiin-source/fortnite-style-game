@@ -13,10 +13,21 @@
  */
 import { CosmeticCategory } from '../../meta/CosmeticCatalog.js';
 import { hashString } from '../../core/Random.js';
+import { RARITIES, RARITY_ORDER } from '../../core/Config.js';
+import { buildCharacterRig } from '../../cosmetics/CharacterRig.js';
+import { getSkin } from '../../cosmetics/SkinDefinitions.js';
+import { paintCharacter } from './CharacterPainter.js';
 
 /** Deterministic 0..1 from a cosmetic id and a salt. */
 function seeded(id, salt) {
   return (hashString(`${id}:${salt}`) % 1000) / 1000;
+}
+
+/** `#rrggbb` plus an alpha, as an rgba() string. */
+function withAlpha(hex, alpha) {
+  const h = hex.replace('#', '');
+  const n = parseInt(h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 /** A rotating preview canvas for one cosmetic. */
@@ -35,6 +46,11 @@ export class CosmeticPreview {
     this.ctx = this.canvas.getContext('2d');
     this.size = size;
     this.animated = animated;
+    /**
+     * Card thumbnails get the rarity wash and pedestal but not the rays, shimmer or
+     * motes: at 130px those read as noise over the item rather than as presentation.
+     */
+    this.compact = size < 160;
     this.cosmetic = null;
     this.angle = 0;
     this._raf = null;
@@ -80,6 +96,19 @@ export class CosmeticPreview {
 
     const [dark, light] = cosmetic.preview?.palette ?? ['#6b7280', '#cbd5e1'];
 
+    // Rarity presentation is the backdrop, never the item itself (SKIN_SPEC §8).
+    this._drawRarityBackdrop(ctx, w, h, cosmetic.rarity);
+
+    // Outfits are characters: painted from the shared rig, which is the same part list the
+    // in-match renderer builds meshes from (SKIN_SPEC §3.1).
+    const skin = cosmetic.category === CosmeticCategory.OUTFIT ? getSkin(cosmetic.id) : null;
+    if (skin) {
+      paintCharacter(ctx, this._rigFor(skin), {
+        width: w, height: h, yaw: Math.sin(this.angle) * 0.55
+      });
+      return;
+    }
+
     // Ground shadow, so the shape reads as an object rather than a sticker.
     ctx.save();
     ctx.globalAlpha = 0.28;
@@ -104,6 +133,113 @@ export class CosmeticPreview {
       case CosmeticCategory.WRAP: this._drawWrap(ctx, s, dark, light, cosmetic.id); break;
       case CosmeticCategory.EMOTE: this._drawEmote(ctx, s, dark, light, cosmetic.id); break;
       default: this._drawOutfit(ctx, s, dark, light, cosmetic.id);
+    }
+    ctx.restore();
+  }
+
+  /** Rigs are deterministic and reused across frames — build each one once. */
+  _rigFor(skin) {
+    if (this._rig?.skin?.id !== skin.id) this._rig = buildCharacterRig(skin);
+    return this._rig;
+  }
+
+  /**
+   * Rarity backdrop — SKIN_SPEC §8. Tiers add layers rather than swapping treatments, so
+   * the ladder reads as a ladder. The item itself is never tinted: rarity must not change
+   * what a cosmetic looks like, only how it is presented.
+   */
+  _drawRarityBackdrop(ctx, w, h, rarity) {
+    const tier = Math.max(0, RARITY_ORDER.indexOf(rarity));
+    const colour = RARITIES[rarity]?.color ?? RARITIES.common.color;
+    const hex = `#${colour.toString(16).padStart(6, '0')}`;
+    const cx = w / 2;
+    const cy = h * 0.52;
+
+    ctx.save();
+    const wash = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.62);
+    wash.addColorStop(0, withAlpha(hex, tier === 0 ? 0.10 : 0.14 + tier * 0.06));
+    wash.addColorStop(0.62, withAlpha(hex, tier === 0 ? 0.03 : 0.05));
+    wash.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, w, h);
+
+    // Rare and up: a horizon band behind the figure's feet.
+    if (tier >= 2 && !this.compact) {
+      const band = ctx.createLinearGradient(0, h * 0.62, 0, h * 0.92);
+      band.addColorStop(0, 'rgba(0,0,0,0)');
+      band.addColorStop(0.55, withAlpha(hex, 0.16));
+      band.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = band;
+      ctx.fillRect(0, h * 0.62, w, h * 0.3);
+    }
+
+    // Epic and up: rays from behind the figure.
+    if (tier >= 3 && !this.compact) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = hex;
+      const rays = 12;
+      for (let i = 0; i < rays; i++) {
+        const a = (i / rays) * Math.PI * 2 + this.angle * 0.12;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a - 0.05) * w * 0.7, Math.sin(a - 0.05) * w * 0.7);
+        ctx.lineTo(Math.cos(a + 0.05) * w * 0.7, Math.sin(a + 0.05) * w * 0.7);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Pedestal: a plain disc, ringed once at rare and twice at legendary.
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = withAlpha(hex, 0.5);
+    ctx.lineWidth = Math.max(1, w * 0.004);
+    const rings = tier >= 4 ? 2 : tier >= 2 ? 1 : 0;
+    ctx.fillStyle = withAlpha(hex, 0.12);
+    ctx.beginPath();
+    ctx.ellipse(cx, h * 0.9, w * 0.26, h * 0.035, 0, 0, Math.PI * 2);
+    ctx.fill();
+    for (let i = 0; i < rings; i++) {
+      ctx.beginPath();
+      ctx.ellipse(cx, h * 0.9, w * (0.3 + i * 0.05), h * (0.04 + i * 0.007), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Epic and up: a slow shimmer sweep across the backdrop.
+    if (tier >= 3 && !this.compact) {
+      const sweep = ((this.angle * 0.18) % 2) - 0.5;
+      const shimmer = ctx.createLinearGradient(w * sweep, 0, w * (sweep + 0.45), h);
+      shimmer.addColorStop(0, 'rgba(255,255,255,0)');
+      shimmer.addColorStop(0.5, 'rgba(255,255,255,0.055)');
+      shimmer.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = shimmer;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // A dark pool where the figure stands. Without it a skin whose palette matches its
+    // rarity hue — a purple epic, a gold legendary — loses its edges against its own
+    // backdrop, which is the one thing the backdrop must never do.
+    const pool = ctx.createRadialGradient(cx, h * 0.55, 0, cx, h * 0.55, w * 0.46);
+    pool.addColorStop(0, 'rgba(10,13,19,0.72)');
+    pool.addColorStop(0.7, 'rgba(10,13,19,0.34)');
+    pool.addColorStop(1, 'rgba(10,13,19,0)');
+    ctx.fillStyle = pool;
+    ctx.fillRect(0, 0, w, h);
+
+    // Legendary: drifting motes, the only tier that gets them.
+    if (tier >= 4 && !this.compact) {
+      ctx.fillStyle = withAlpha(hex, 0.55);
+      for (let i = 0; i < 9; i++) {
+        const t = this.angle * 0.5 + i;
+        const mx = cx + Math.sin(t * 0.7 + i) * w * 0.34;
+        const my = h * 0.88 - ((t * 0.05 + i * 0.11) % 1) * h * 0.74;
+        const r = w * (0.004 + (i % 3) * 0.002);
+        ctx.beginPath();
+        ctx.arc(mx, my, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }

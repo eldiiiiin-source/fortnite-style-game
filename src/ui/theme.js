@@ -157,10 +157,25 @@ ${rarityVars}
 .preview { display:flex; flex-direction:column; height:100%; }
 .preview-stage { flex:1; position:relative; display:grid; place-items:center; min-height:200px;
   background:radial-gradient(600px 400px at 50% 38%, rgba(255,255,255,.055), transparent 70%); }
-.preview-stage canvas { max-width:100%; max-height:100%; }
+/* object-fit matters here: a canvas given only max-height is scaled non-uniformly,
+   which squashed the character once the trait rows made the meta panel taller. */
+.preview-stage canvas { max-width:100%; max-height:100%; object-fit:contain; }
 .preview-meta { padding:16px 18px; border-top:1px solid var(--line); }
 .preview-name { font-size:21px; font-weight:900; margin-bottom:5px; }
 .preview-desc { font-size:12.5px; color:var(--text-dim); line-height:1.5; margin-top:9px; }
+
+/* ── skin traits — SKIN_SPEC §5, §6 ───────────────────────────────────── */
+.skin-traits { margin-top:13px; padding-top:12px; border-top:1px solid var(--line); }
+.trait-line { font-size:11px; font-weight:800; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--text-dim); display:flex; gap:7px; align-items:center; }
+.trait-dot { color:var(--rarity, var(--text-faint)); }
+.trait-chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }
+.trait-chip { font-size:10px; font-weight:700; letter-spacing:.03em; padding:3px 7px;
+  border-radius:999px; background:var(--bg-3); color:var(--text-dim);
+  border:1px solid var(--line); }
+.trait-swatches { display:flex; gap:5px; margin-top:11px; }
+.trait-swatch { width:20px; height:20px; border-radius:3px;
+  border:1px solid rgba(255,255,255,.18); box-shadow:0 1px 3px rgba(0,0,0,.45); }
 .preview-actions { display:flex; gap:9px; margin-top:15px; }
 
 /* ── lobby ────────────────────────────────────────────────────────────── */

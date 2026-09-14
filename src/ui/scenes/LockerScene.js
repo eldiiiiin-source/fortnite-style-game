@@ -10,6 +10,7 @@ import { Scene, SceneName } from '../../app/SceneManager.js';
 import { el, mount, button } from '../dom.js';
 import { topBar, backFooter } from '../components/Shell.js';
 import { CosmeticPreview, cosmeticThumbnail } from '../components/CosmeticPreview.js';
+import { skinTraits } from '../components/SkinTraits.js';
 import { CATEGORY_LABELS, CATEGORY_ORDER } from '../../meta/CosmeticCatalog.js';
 import { RARITIES } from '../../core/Config.js';
 
@@ -133,6 +134,7 @@ export class LockerScene extends Scene {
         el('div.preview-name', { text: cosmetic.name }),
         el('div.card-cat', { text: CATEGORY_LABELS[cosmetic.category] }),
         el('p.preview-desc', { text: cosmetic.description }),
+        skinTraits(cosmetic),
         el('div.preview-actions', {}, [
           equipped
             ? button('Equipped', () => {}, { disabled: true, icon: '✓' })

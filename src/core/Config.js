@@ -105,6 +105,53 @@ export const MANTLE = Object.freeze({
   suppressAfterBuildTime: 0.20
 });
 
+/* ══ CHARACTER RIG — SKIN_SPEC §3, §5 ════════════════════════════════════════
+ * Visual proportions for the player character. Purely cosmetic: collision stays the
+ * capsule in MOVEMENT for every skin (SKIN_SPEC §3.4, ITEM_SHOP_SPEC §4.4).
+ *
+ * Everything is a ratio of the capsule, so a retune of TILE / WALL_H rescales every
+ * character with the world instead of leaving skins the wrong size. Only the anchors that
+ * cannot be derived live here — the rig computes torso height, arm and leg spans from
+ * them, which is what keeps every build exactly standHeight tall (§3.2).
+ */
+
+export const CHARACTER = Object.freeze({
+  /** Reference dimensions the whole rig is expressed against. */
+  height: MOVEMENT.standHeight,
+  radius: MOVEMENT.capsuleRadius,
+
+  /** Hip line: the top of the legs and the bottom of the torso. */
+  hipY: MOVEMENT.standHeight * 0.46,
+  footHeight: MOVEMENT.standHeight * 0.05,
+
+  /** Base part sizes for the `athletic` build; builds scale these (§5). */
+  torsoWidth: MOVEMENT.capsuleRadius * 2.05,
+  torsoDepth: MOVEMENT.capsuleRadius * 1.25,
+  hipWidth: MOVEMENT.capsuleRadius * 1.70,
+  headRadius: MOVEMENT.capsuleRadius * 0.58,
+  neckLength: MOVEMENT.capsuleRadius * 0.36,
+  neckWidth: MOVEMENT.capsuleRadius * 0.62,
+  armWidth: MOVEMENT.capsuleRadius * 0.52,
+  armDepth: MOVEMENT.capsuleRadius * 0.60,
+  armLength: MOVEMENT.standHeight * 0.36,
+  legWidth: MOVEMENT.capsuleRadius * 0.74,
+  legDepth: MOVEMENT.capsuleRadius * 0.88,
+
+  /**
+   * Build multipliers (§5). Applied before features, so two builds read as different
+   * shapes rather than as different palettes.
+   *
+   * `legScale` moves the hip line, which is what makes a mascot stubby and a lean frame
+   * long-legged without either one changing the character's overall height.
+   */
+  builds: Object.freeze({
+    lean: { shoulder: 0.88, torso: 0.86, limb: 0.88, head: 1.00, legScale: 1.06, stance: 0.92 },
+    athletic: { shoulder: 1.00, torso: 1.00, limb: 1.00, head: 1.00, legScale: 1.00, stance: 1.00 },
+    heavy: { shoulder: 1.14, torso: 1.12, limb: 1.12, head: 0.94, legScale: 0.96, stance: 1.10 },
+    stout: { shoulder: 1.04, torso: 1.12, limb: 0.96, head: 1.62, legScale: 0.78, stance: 1.06 }
+  })
+});
+
 /* ══ CAMERA — MASTER_SPEC §7 ═════════════════════════════════════════════════ */
 
 export const CAMERA = Object.freeze({

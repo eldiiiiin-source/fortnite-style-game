@@ -11,6 +11,7 @@ import { Scene, SceneName } from '../../app/SceneManager.js';
 import { el, mount, button, formatNumber } from '../dom.js';
 import { topBar, backFooter } from '../components/Shell.js';
 import { CosmeticPreview, cosmeticThumbnail } from '../components/CosmeticPreview.js';
+import { skinTraits } from '../components/SkinTraits.js';
 import { CATEGORY_LABELS } from '../../meta/CosmeticCatalog.js';
 import { PurchaseResult } from '../../meta/ShopManager.js';
 import { RARITIES } from '../../core/Config.js';
@@ -165,6 +166,7 @@ export class ShopScene extends Scene {
         el('div.preview-name', { text: item.name }),
         el('div.card-cat', { text: CATEGORY_LABELS[item.category] }),
         el('p.preview-desc', { text: item.description }),
+        skinTraits(item),
         el('div.preview-actions', {}, [action])
       ])
     ]);

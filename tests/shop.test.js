@@ -34,7 +34,7 @@ const makeProfile = () => {
 describe('§9 cosmetic catalog', () => {
   it('meets the §9.2 count target', () => {
     const counts = catalogCounts();
-    expect(counts.outfit).toBe(8);
+    expect(counts.outfit).toBe(16);   // SKIN_SPEC §7 raised the roster
     expect(counts.pickaxe).toBe(6);
     expect(counts.glider).toBe(6);
     expect(counts.backAccessory).toBe(5);
