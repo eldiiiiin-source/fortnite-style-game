@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.4.0 |
+| Version | 1.4.1 |
 | Supersedes | Baseline v0.1.0 ("Cinder Isle") — void |
 | Companion | `docs/MASTER_SPEC.md`, `references/map/` |
 
@@ -479,6 +479,21 @@ puts it and its buildings step to the nearest dry origin within `WORLD.poiSettle
 of its DRY cells, so a stilted cabin sits on its bank with the dock reaching out over the
 channel, rather than 10.9 m below the bank it belongs to.
 
+#### 21.2.2 A building over water stands on real pilings [OWNER-derived]
+
+Riverwatch's cabin spans a ravine. It was drawn as a stilted cabin but built without stilts:
+a floor slab in mid-air with a house on top, held up by nothing. Under live structural
+integrity (MASTER_SPEC §9.5.1) the support model was right to reject all 67 of its pieces.
+
+A building that stands over water carries **pilings** — a stack of walls from the riverbed
+to the underside of its floor, at the corners that bear the load. They are built from
+ARCH-patterned walls, which cut the middle column out, so a stack reads as a pair of posts
+rather than as a solid slab boxing in the space beneath.
+
+This is not a workaround for the support rules. It is the geometry the POI was always
+described as having, and the structure is now honestly load-bearing: cut the pilings and the
+cabin comes down, which is the correct answer.
+
 ### 21.3 Roofs
 
 Cones are banned as the primary roof form — one per cell gives a field of spikes.
@@ -576,6 +591,7 @@ stronger landmarks, better performance.**
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4.1 | 2026-09-14 | Adds §21.2.2: a building standing over water carries real pilings. Riverwatch's cabin, deck, net store and boardwalk are now structurally supported rather than floating. |
 | 1.4.0 | 2026-09-14 | Adds §21.1.1 landmarks: one vertical anchor each for Kettle Row (water tower), Riverwatch (net-drying frame) and Dray Yard (loading gantry), assembled from shared `shaft`/`beam` primitives. Hollow Farm, Pumpjack Stop and Crown Post reviewed and left unchanged. Riverwatch's boardwalk is now founded per-cell on the ground beneath it, fixing six dock cells that sat 11.5 m inside the far bank. |
 | 1.3.0 | 2026-09-14 | Adds §21.2.1: POI pads are sized to the blueprint footprint, snapped to a storey line, and aproned at a walkable grade; overlapping pads blend by influence weight; a POI whose footprint lands in water settles onto dry ground while its marker stays put. Fixes buildings standing up to 7.3 m inside their own ground. |
 | 1.2.1 | 2026-09-14 | Adds §21.9 interior lighting: a flat ambient floor so enclosed rooms are readable per §21.4, with lighting intensities moved into `Config.LIGHTING`. |

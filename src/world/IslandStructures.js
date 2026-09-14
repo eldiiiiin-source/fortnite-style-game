@@ -149,6 +149,25 @@ function flatRoof(material, x0, z0, width, depth, storey, { parapet = true } = {
   return out;
 }
 
+/**
+ * A piling: a stack of walls from the ground up to (but not including) `topStorey`.
+ *
+ * Carries a floor that stands over water. Structurally this is exactly what the support
+ * model wants — a wall is held by the wall directly below it in the same direction, so the
+ * column chains down to the one resting on the bed, and the floor above is held by "a wall
+ * in the cell below".
+ *
+ * Built from ARCH-patterned walls, which cut the middle column out: a stack of those reads
+ * as a pair of posts rather than as a solid slab boxing in the space under a building.
+ */
+function piling(material, x, z, groundStorey, topStorey, direction = 'west') {
+  const out = [];
+  for (let y = groundStorey; y < topStorey; y++) {
+    out.push(piece('wall', material, x, y, z, direction, Opening.ARCH));
+  }
+  return out;
+}
+
 /** A ramp run from one storey to the next, walkable in both directions. */
 function stairs(material, x, z, storey, direction = 'north') {
   return [piece('ramp', material, x, storey, z, direction)];
@@ -433,14 +452,20 @@ const BLUEPRINTS = {
    * Story: someone fishes here. A stilted cabin with a deck, a dock out over the water, a
    * net store, and a plank bridge. Low ground, exposed approach, quick loot.
    */
-  dock(ox, oz, { waterStorey = 0, groundStoreyAt = () => 0 } = {}) {
+  dock(ox, oz, { waterStorey = 0, groundStoreyAt = () => 0, terrainStoreyAt = () => 0 } = {}) {
     const out = [];
     // The cabin stands on the BANK (§21.2.1) and the river here runs in a channel below it,
     // so the dock is not at the cabin's feet — it is `waterStorey` storeys down. Reaching
     // for it is the whole point of the POI: you drop to the water and you are exposed.
     const deck = waterStorey;
 
-    // Stilted cabin: raised a storey so the water runs under it.
+    // Stilted cabin: raised a storey so the water runs under it. The stilts are REAL — four
+    // corner pilings reaching from the riverbed to the underside of the floor. Without them
+    // the cabin is a building standing on nothing, which the support model is right to
+    // reject, and the POI's own description ("a stilted cabin") is not met by the geometry.
+    for (const [dx, dz] of [[0, 0], [2, 0], [0, 2], [2, 2]]) {
+      out.push(...piling('wood', ox + dx, oz + dz, terrainStoreyAt(dx, dz), 0));
+    }
     out.push(...slab('wood', ox, oz, 3, 3, 0));
     out.push(...room('wood', ox, oz, 3, 3, 1, {
       openings: [
@@ -474,6 +499,10 @@ const BLUEPRINTS = {
         out.push(piece('ramp', 'wood', ox + 1, y - 1, oz - k, 'north'));
       }
       out.push(piece('floor', 'wood', ox + 1, ground, oz - k));
+      // A plank at the waterline is over the bed, not on it: post it down like the cabin.
+      if (ground > terrainStoreyAt(1, -k)) {
+        out.push(...piling('wood', ox + 1, oz - k, terrainStoreyAt(1, -k), ground));
+      }
       if (ground === deck) {
         out.push(piece('wall', 'wood', ox + 1, ground, oz - k, 'west', Opening.HALF));
         out.push(piece('wall', 'wood', ox + 1, ground, oz - k, 'east', Opening.HALF));
@@ -490,7 +519,12 @@ const BLUEPRINTS = {
     // hanging off one leg.
     out.push(...dryingFrame('wood', ox + 2, oz - 5, 0, 5, 3));
 
-    // Net store: a small shed beside the cabin, one way in.
+    // Net store: a small shed beside the cabin, one way in. It stands over the channel too,
+    // so it gets its own floor and pilings rather than resting on the water.
+    for (const [dx, dz] of [[4, 1], [5, 2]]) {
+      out.push(...piling('wood', ox + dx, oz + dz, terrainStoreyAt(dx, dz), 0));
+    }
+    out.push(...slab('wood', ox + 4, oz + 1, 2, 2, 0));
     out.push(...room('wood', ox + 4, oz + 1, 2, 2, 0, {
       openings: [
         { side: 'south', index: 0, pattern: Opening.DOOR },
@@ -840,7 +874,7 @@ function footprintOf(blueprint) {
   // The widest shape the blueprint can take. A terrain-aware blueprint shortens itself on
   // some sites (Riverwatch's boardwalk stops at the bank), and the pad has to cover the
   // longest version or a POI on flatter ground would overrun its own level ground.
-  for (const p of blueprint(0, 0, { waterStorey: 0, groundStoreyAt: () => 0 })) {
+  for (const p of blueprint(0, 0, { waterStorey: 0, groundStoreyAt: () => 0, terrainStoreyAt: () => 0 })) {
     const key = `${p.cell.cx},${p.cell.cz}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -872,8 +906,15 @@ export function resolveStructures(pois, terrain) {
     const groundStoreyAt = (dx, dz) => (
       Math.round(groundOfCell(terrain, ox + dx, oz + dz) / WALL_H) - baseStorey
     );
+    // The storey whose vertical span the terrain actually passes THROUGH — the one a piece
+    // must occupy to be grounded (StructureGraph.touchesTerrain). Distinct from
+    // `groundStoreyAt`, which rounds to the nearest storey line to found a floor ON the
+    // ground; over a riverbed 0.3 m below a storey line the two differ by a whole storey.
+    const terrainStoreyAt = (dx, dz) => (
+      Math.floor(groundOfCell(terrain, ox + dx, oz + dz) / WALL_H) - baseStorey
+    );
 
-    for (const p of blueprint(ox, oz, { waterStorey, groundStoreyAt })) {
+    for (const p of blueprint(ox, oz, { waterStorey, groundStoreyAt, terrainStoreyAt })) {
       out.push({
         type: p.type,
         material: p.material,

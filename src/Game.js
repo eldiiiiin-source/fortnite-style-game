@@ -15,6 +15,7 @@ import { BuildPiece } from './building/BuildPiece.js';
 import { CollisionWorld } from './building/CollisionWorld.js';
 import { PlacementQueue } from './building/PlacementQueue.js';
 import { validatePlacement, placePiece } from './building/Placement.js';
+import { SupportSystem } from './building/SupportSystem.js';
 import { resolveBuildTarget } from './building/BuildTargeting.js';
 import { EditController } from './editing/EditController.js';
 import { PlayerController } from './player/PlayerController.js';
@@ -70,6 +71,14 @@ export class Game {
     this.editor = new EditController(this.grid, this.bus, settings);
     this.placementQueue = new PlacementQueue();
     this.pickaxe = new Pickaxe(this.bus);
+
+    // §6.5 — structural integrity, live. Dirty-region rather than a world scan: a placement
+    // or a destruction re-evaluates only what rested on the piece that changed.
+    this.support = new SupportSystem({
+      grid: this.grid,
+      terrainHeightAt: (cx, cz) => this.terrain.heightAt((cx + 0.5) * TILE, (cz + 0.5) * TILE),
+      onCollapse: (piece) => this.bus.emit(Events.PIECE_DESTROYED, { piece, cause: 'unsupported' })
+    });
     this.worldLoot = new WorldLoot(this.bus, this.rng.loot);
 
     /** §17 — lightweight test targets. */
@@ -122,7 +131,12 @@ export class Game {
     }
     this.camera.snapTo(this.player);
     this._populateRegion();
+    this._wireStructureEvents();
     this._wireCombatEvents();
+
+    // One global pass to establish what is standing. Every answer after this is incremental,
+    // so this is the only full-world support scan a match ever runs.
+    this.support.seed();
   }
 
   /** Build the validation region's contents (§22). */
@@ -212,6 +226,24 @@ export class Game {
     return this.inventory.pickaxeEquipped ? this.pickaxe.swingProgress : 1;
   }
 
+  /**
+   * One place where a destroyed piece leaves the world.
+   *
+   * Destruction is reported by several systems — weapon fire, the pickaxe, an edit, a
+   * collapse — and they did not agree on what to do about it: the weapon path removed the
+   * piece from the grid, the pickaxe path only emitted the event, so a pickaxed wall stayed
+   * in its slot forever and the player could never rebuild there. Removal now happens here,
+   * once, for every cause, and the same handler tells the support system what moved.
+   */
+  _wireStructureEvents() {
+    this.bus.on(Events.PIECE_DESTROYED, ({ piece }) => {
+      this.grid.remove(piece);          // idempotent; several paths also remove their own
+      this.support.markDirty(piece);
+    });
+    this.bus.on(Events.PIECE_PLACED, ({ piece }) => this.support.markDirty(piece));
+    this.bus.on(Events.PIECE_EDITED, ({ piece }) => this.support.markEdited(piece));
+  }
+
   _wireCombatEvents() {
     // Bots damage their target directly through takeDamage; the event is for audio and
     // the admin event log only.
@@ -246,6 +278,7 @@ export class Game {
     this.aimRay = aimRayFrom(this.camera);
 
     this.grid.update(dt);
+    this.support.update(dt);
     this._updateBuildTarget();
     this.placementQueue.update(dt, (i) => this._executePlacement(i));
     this._updateEditing(dt, intent);

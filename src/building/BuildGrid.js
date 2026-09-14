@@ -74,6 +74,11 @@ export class BuildGrid {
     this.revision++;
   }
 
+  /** Is this exact piece still in the grid? */
+  has(piece) {
+    return this.piecesById.get(piece.id) === piece;
+  }
+
   getCell(cx, cy, cz) {
     return this.cells.get(cellKey(cx, cy, cz)) ?? null;
   }
@@ -118,6 +123,11 @@ export class BuildGrid {
   }
 
   remove(piece) {
+    // Idempotent. Destruction is reported on the bus and several systems react to it, so a
+    // piece can be removed more than once; without this the second call would delete
+    // whatever now occupies the slot, which may be a piece the player has just rebuilt.
+    if (this.piecesById.get(piece.id) !== piece) return;
+
     const key = cellKey(piece.cell.cx, piece.cell.cy, piece.cell.cz);
     const slots = this.cells.get(key);
     if (slots) {

@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.0.0 |
+| Version | 1.1.0 |
 | Owner | eldin.omerhodzic@icloud.com |
 | Supersedes | Baseline v0.1.0 (temporary placeholder, now void) |
 | Companion | `docs/MAP_SPEC.md`, `references/map/02-chapter2-season1-references.md` |
@@ -434,6 +434,48 @@ Structures have health, receive weapon damage, receive pickaxe damage, are destr
 
 **No invisible collision after destruction.** Destroying a piece removes its collider in
 the same tick the piece is removed — verified by test.
+
+### 9.5.1 Structural integrity is live [OWNER-derived]
+
+A piece stands only while it transitively reaches the ground. When its support goes, it goes
+— after `BUILD.supportGraceTime`, which is what makes a collapse read as a collapse rather
+than as pieces blinking out.
+
+**One destruction path.** Every cause — weapon fire, the pickaxe, an edit, a collapse —
+reports `piece:destroyed`, and a single handler removes the piece from the grid and tells
+the support system. Before this the paths disagreed: the weapon path removed the piece, the
+pickaxe path only announced it, so a pickaxed wall kept its slot forever and the player could
+never rebuild in it.
+
+**Dirty-region, not a world scan.** Support can only change where the grid changed, so a
+placement or a destruction re-evaluates the pieces that rest on the changed piece and nothing
+else. One global pass runs at match start to establish the baseline; every answer after that
+is incremental. An idle frame costs nothing.
+
+This is exact, not an approximation. Every lookup that decides support is inside a piece's
+own cell, the cell below, or an orthogonal neighbour, so the set of pieces that can name a
+given piece as a supporter is bounded to a five-cell footprint across two layers. Inverting
+that precisely is what makes the local answer identical to the global one — and that identity
+is asserted by test, not assumed.
+
+**Responsiveness outranks structural simulation.** Support work must never sit between an
+input and a placement.
+
+What supports what:
+
+- A **floor** rests on walls at its own cell's edges, on a ramp or cone directly below, on
+  the high edge of a ramp in the neighbouring cell one layer down, or on an adjacent floor.
+- A **wall** rests on a floor in its cell, on the wall directly below it facing the same way,
+  or on a floor in the cell below.
+- A **ramp or cone** rests on a floor in its cell, or on anything in the cell below.
+- A piece resting ON the ground is grounded. That test carries a tolerance of one piece
+  thickness at both ends: POI pads are snapped to a storey line (MAP_SPEC §21.2.1), so a
+  whole POI's ground storey sits exactly on the boundary, and an exact comparison would let
+  floating-point noise decide whether a building stands.
+
+**Edit patterns do not participate.** What holds a piece up is what it IS and where, never
+which tiles survive an edit: a wall cut down to a half wall still carries the floor above it.
+Deleting a piece by edit is a removal like any other.
 
 ## 10. Editing system [OWNER]
 
@@ -964,5 +1006,6 @@ or derived. Listed highest-impact first.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.1.0 | 2026-09-14 | Adds §9.5.1: structural integrity runs live, via dirty-region support propagation rather than a per-frame world scan. Unifies the destruction path so every cause removes the piece from the grid. Adds the ramp-landing support relationship and a ground-contact tolerance. |
 | 1.0.0 | 2026-09-13 | Replaced the placeholder baseline with the owner's authoritative specification. Key corrections: per-type edit grids (floor 2×2, cone 2×2, ramp 3×2), edited collision as a first-class system, five-slot inventory with a separate pickaxe, BRICK replacing stone, shared camera aim ray, placement queue replacing input-dropping rate limits, per-pellet shotgun resolution, recoil and equip time, world loot entities, settings, audio, bots. |
 | 0.1.0 | 2026-09-13 | Initial baseline placeholder. Void. |
