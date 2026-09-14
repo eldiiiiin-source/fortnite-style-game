@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | **Authoritative — supplied by the project owner, 2026-09-13** |
-| Version | 1.3.0 |
+| Version | 1.4.0 |
 | Supersedes | Baseline v0.1.0 ("Cinder Isle") — void |
 | Companion | `docs/MASTER_SPEC.md`, `references/map/` |
 
@@ -409,10 +409,34 @@ From medium distance each POI must be distinguishable without the map:
 | --- | --- |
 | Hollow Farm | Long barn beside a tall capped silo |
 | Pumpjack Stop | Flat-roofed station under a wide forecourt canopy |
-| Kettle Row | A run of pitched roofs at different heights |
-| Riverwatch | A stilted cabin with a dock reaching over the water |
-| Crown Post | A four-storey tower on the skyline |
-| Dray Yard | Wide flat warehouses with container stacks |
+| Kettle Row | A run of pitched roofs under a neighbourhood water tower |
+| Riverwatch | A stilted cabin, a boardwalk to the water, a net-drying frame on the bank |
+| Crown Post | A five-storey tower on the skyline |
+| Dray Yard | Wide flat warehouses under a loading gantry, with container stacks |
+
+#### 21.1.1 Landmarks [OWNER-derived]
+
+A POI built only from the buildings its function needs reads as a smudge at 70 m. Three of
+the six did: Kettle Row, Riverwatch and Dray Yard are all low and horizontal, and a player
+could not name them from across the valley. Each therefore carries **one** vertical landmark.
+
+Rules for a landmark:
+
+- **One per POI, and only where it is needed.** Hollow Farm's silo, Pumpjack Stop's canopy
+  and Crown Post's tower already do this job; adding more would flatten the contrast between
+  POIs rather than sharpen it.
+- **It out-tops its own POI by at least a storey, and never out-tops Crown Post.** Crown
+  Post is the island's landmark, and that is measured in ABSOLUTE height — it stands on a
+  hilltop, so counting storeys above each POI's own base would rank a water tower its equal.
+- **It is a silhouette, not a position.** No stair, no internal floor: a landmark is cover
+  and a navigation cue, never a tower to hold. Players may still build up to it.
+- **It stands clear of the POI's combat space** — off the street, off the yard floor, out of
+  the interiors and loot route.
+- **It is founded on dry, grounded cells.** A post over even 0.2 m of water never reaches
+  terrain, so support propagation would delete its column and leave the span hanging.
+
+Landmarks are assembled from shared primitives — `shaft`, `beam` — so a water tower, a
+gantry and a drying frame are the same two parts at different scales and materials.
 
 ### 21.2 Architecture comes from the edit system
 
@@ -517,6 +541,8 @@ outpost watches the island.
     ground, and each POI's pad is flat across its whole footprint and on a storey line.
 13. Openings reach the geometry: a patterned wall renders fewer solid tiles than a full one,
     and a half wall stands one edit row high.
+14. Crown Post is the tallest POI in ABSOLUTE height, and every POI carrying a landmark
+    stands at least five storeys above its own base (§21.1.1).
 
 ### 21.9 Interior lighting [OWNER-derived]
 
@@ -550,6 +576,7 @@ stronger landmarks, better performance.**
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4.0 | 2026-09-14 | Adds §21.1.1 landmarks: one vertical anchor each for Kettle Row (water tower), Riverwatch (net-drying frame) and Dray Yard (loading gantry), assembled from shared `shaft`/`beam` primitives. Hollow Farm, Pumpjack Stop and Crown Post reviewed and left unchanged. Riverwatch's boardwalk is now founded per-cell on the ground beneath it, fixing six dock cells that sat 11.5 m inside the far bank. |
 | 1.3.0 | 2026-09-14 | Adds §21.2.1: POI pads are sized to the blueprint footprint, snapped to a storey line, and aproned at a walkable grade; overlapping pads blend by influence weight; a POI whose footprint lands in water settles onto dry ground while its marker stays put. Fixes buildings standing up to 7.3 m inside their own ground. |
 | 1.2.1 | 2026-09-14 | Adds §21.9 interior lighting: a flat ambient floor so enclosed rooms are readable per §21.4, with lighting intensities moved into `Config.LIGHTING`. |
 | 1.2.0 | 2026-09-14 | [OWNER] POI architecture, interiors and detail pass (§21): openings via the edit system, ramp-based roofs, interiors with stairs and second routes, authored per-POI loot routes with a risk chest, visual prop dressing, and silhouette identity. Macro layout frozen. |

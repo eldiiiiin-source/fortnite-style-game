@@ -560,17 +560,25 @@ describe('MAP_SPEC §21 — POI architecture, interiors and loot', () => {
   });
 
   it('gives the tall POIs real vertical presence', () => {
-    // Measured UP from each POI's own base storey, not as a storey span. Riverwatch's dock
-    // descends three storeys to the waterline (§21.2.1), which makes its span the largest on
-    // the island while it remains the lowest thing on the skyline.
-    const height = (id) => {
+    // ABSOLUTE height above sea level, not storeys above each POI's own base. "Crown Post
+    // dominates the skyline" is a claim about where its roof sits on the horizon, and it is
+    // on a hilltop 11.5 m above Kettle Row — counting storeys alone would call its tower and
+    // a water tower on lower ground equals, which is not what a player sees.
+    //
+    // Riverwatch's boardwalk descends to the waterline (§21.2.1), so measuring a storey SPAN
+    // would rank it tallest while it remains the lowest thing on the island.
+    const topOf = (id) => Math.max(...piecesByPoi.get(id).map((p) => p.cell.cy)) * WALL_H;
+    for (const id of ['hollowFarm', 'pumpjackStop', 'kettleRow', 'riverwatch', 'drayYard']) {
+      expect(topOf('crownPost'), `crownPost vs ${id}`).toBeGreaterThan(topOf(id));
+    }
+
+    // And each POI that carries a landmark must out-top its own ordinary buildings by at
+    // least a storey, or the landmark is not doing its job at 70 m (§21.1).
+    for (const id of ['kettleRow', 'riverwatch', 'drayYard']) {
       const poi = POIS.find((p) => p.id === id);
       const base = originFor(poi, island).baseStorey;
-      return Math.max(...piecesByPoi.get(id).map((p) => p.cell.cy)) - base;
-    };
-    // Crown Post is the island's landmark; it must out-top every other POI.
-    for (const id of ['hollowFarm', 'pumpjackStop', 'kettleRow', 'riverwatch', 'drayYard']) {
-      expect(height('crownPost'), `crownPost vs ${id}`).toBeGreaterThan(height(id));
+      const storeys = Math.max(...piecesByPoi.get(id).map((p) => p.cell.cy)) - base;
+      expect(storeys, `${id} has no vertical landmark`).toBeGreaterThanOrEqual(5);
     }
   });
 

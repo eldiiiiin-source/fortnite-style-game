@@ -168,6 +168,85 @@ function porch(material, x0, z0, width, depth, storey) {
   return out;
 }
 
+/* ── landmarks — MAP_SPEC §21.1 ──────────────────────────────────────────── */
+
+/**
+ * A slender shaft of walls, one cell square, rising `height` storeys.
+ *
+ * The shared primitive behind every landmark below: a post, a leg, a mast, a tower stem.
+ * One cell is 5.12 m, so a shaft reads as slender rather than as a building, and with no
+ * floors inside it there is nothing to climb — a landmark must not become a fortress.
+ */
+function shaft(material, x, z, storey, height) {
+  const out = [];
+  for (let y = 0; y < height; y++) out.push(...room(material, x, z, 1, 1, storey + y));
+  return out;
+}
+
+/**
+ * A beam: a run of floor slabs with a half-wall rail down each long side.
+ *
+ * Spans between two shafts to make a gantry or a drying frame. Support propagates along
+ * adjacent floors at the same layer, so a span only needs one end standing on a shaft.
+ */
+function beam(material, x0, z0, length, storey, axis = 'x') {
+  const out = [];
+  for (let i = 0; i < length; i++) {
+    const x = axis === 'x' ? x0 + i : x0;
+    const z = axis === 'x' ? z0 : z0 + i;
+    out.push(piece('floor', material, x, storey, z));
+    const sides = axis === 'x' ? ['south', 'north'] : ['west', 'east'];
+    for (const side of sides) out.push(piece('wall', material, x, storey, z, side, Opening.HALF));
+  }
+  return out;
+}
+
+/**
+ * A water tower: a slender stem carrying a wider tank (§21.1).
+ *
+ * The tank overhangs the stem, which is the whole silhouette — a plain shaft reads as
+ * another silo. The tank is sealed: no floor inside, no way up, so it is a landmark and
+ * a piece of cover rather than a vertical position to hold.
+ */
+function waterTower(material, x, z, storey, stemHeight) {
+  const out = shaft(material, x, z, storey, stemHeight);
+  const top = storey + stemHeight;
+  out.push(...slab(material, x, z, 2, 2, top));            // tank underside
+  out.push(...room(material, x, z, 2, 2, top));            // tank shell
+  out.push(...slab(material, x, z, 2, 2, top + 1));        // tank lid
+  return out;
+}
+
+/**
+ * A gantry: two legs carrying a spanning catwalk (§21.1).
+ *
+ * The legs stand clear of each other so the yard still runs underneath — the point is a
+ * vertical anchor over open ground, not a wall across it.
+ */
+function gantry(material, x0, z, storey, legHeight, span) {
+  const out = [
+    ...shaft(material, x0, z, storey, legHeight),
+    ...shaft(material, x0 + span - 1, z, storey, legHeight)
+  ];
+  out.push(...beam(material, x0, z, span, storey + legHeight));
+  return out;
+}
+
+/**
+ * A net-drying frame: two posts and a railed crossbeam, open underneath (§21.1).
+ *
+ * Same shape as a gantry at a smaller scale, in wood rather than metal — enough to read as
+ * "the fishing place" from across the valley.
+ */
+function dryingFrame(material, x, z0, storey, postHeight, span) {
+  const out = [
+    ...shaft(material, x, z0, storey, postHeight),
+    ...shaft(material, x, z0 + span - 1, storey, postHeight)
+  ];
+  out.push(...beam(material, x, z0, span, storey + postHeight, 'z'));
+  return out;
+}
+
 /* ── blueprints — MAP_SPEC §20.7, §21 ────────────────────────────────────── */
 
 /**
@@ -336,6 +415,16 @@ const BLUEPRINTS = {
     for (let i = -1; i <= 12; i++) {
       out.push(piece('wall', 'wood', ox + i, 0, oz - 2, 'south', Opening.HALF));
     }
+
+    // The neighbourhood water tower (§21.1) — the one thing that reads from 70 m. Four
+    // storeys of stem puts the tank about 8 m clear of the tallest roof, which is enough to
+    // name the place and nowhere near Crown Post's tower.
+    //
+    // Sited in the back yards MID-ROW rather than at an end, so it reads from both
+    // approaches and its stem stands clear of the houses instead of hiding behind the last
+    // one. Off the street, so it breaks no sightline along the row.
+    out.push(...waterTower('metal', ox + 7, oz + 2, 0, 4));
+
     return out;
   },
 
@@ -344,7 +433,7 @@ const BLUEPRINTS = {
    * Story: someone fishes here. A stilted cabin with a deck, a dock out over the water, a
    * net store, and a plank bridge. Low ground, exposed approach, quick loot.
    */
-  dock(ox, oz, { waterStorey = 0 } = {}) {
+  dock(ox, oz, { waterStorey = 0, groundStoreyAt = () => 0 } = {}) {
     const out = [];
     // The cabin stands on the BANK (§21.2.1) and the river here runs in a channel below it,
     // so the dock is not at the cabin's feet — it is `waterStorey` storeys down. Reaching
@@ -371,25 +460,35 @@ const BLUEPRINTS = {
       out.push(piece('wall', 'wood', ox - 1, 0, oz + k, 'west', Opening.HALF));
     }
 
-    // A stair flight down the bank to the waterline: one ramp per storey of drop, each one
-    // a cell further out, so it descends AWAY from the cabin rather than through it.
-    const steps = -deck;
-    for (let i = 0; i < steps; i++) {
-      const y = -i;                       // storey this flight starts from
-      const z = oz - 1 - i;               // one cell further from the cabin each step
-      out.push(piece('ramp', 'wood', ox + 1, y - 1, z, 'north'));
-      out.push(piece('floor', 'wood', ox + 1, y, z));
+    // The descent to the water, one cell at a time, each plank founded on the ground UNDER
+    // it (§21.2.1). The river here runs in a narrow ravine and the far side is high ground
+    // again, so running the whole deck at the waterline buried six of its cells 11.5 m
+    // inside that far bank. The run therefore stops where the bank comes back up rather
+    // than tunnelling through it.
+    let previous = 0;
+    for (let k = 1; k <= 6; k++) {
+      const ground = Math.max(deck, groundStoreyAt(1, -k));
+      if (k > 1 && ground >= 0) break;           // back on the bank — the water is behind us
+      // Ramps bridge each storey of the drop so the descent stays walkable.
+      for (let y = previous; y > ground; y--) {
+        out.push(piece('ramp', 'wood', ox + 1, y - 1, oz - k, 'north'));
+      }
+      out.push(piece('floor', 'wood', ox + 1, ground, oz - k));
+      if (ground === deck) {
+        out.push(piece('wall', 'wood', ox + 1, ground, oz - k, 'west', Opening.HALF));
+        out.push(piece('wall', 'wood', ox + 1, ground, oz - k, 'east', Opening.HALF));
+      }
+      previous = ground;
     }
 
-    // The dock: a plank run out over the water at the waterline, railed at the far end.
-    const head = oz - 1 - steps;
-    for (let k = 0; k < 5; k++) {
-      out.push(piece('floor', 'wood', ox + 1, deck, head - k));
-      if (k >= 2) {
-        out.push(piece('wall', 'wood', ox + 1, deck, head - k, 'west', Opening.HALF));
-        out.push(piece('wall', 'wood', ox + 1, deck, head - k, 'east', Opening.HALF));
-      }
-    }
+    // Net-drying frame (§21.1): two posts and a railed crossbeam, open underneath. It is
+    // what names the place from across the valley — the cabin alone is a brown box at 70 m.
+    //
+    // Sited on the bank just past the head of the boardwalk, where the ground comes back up.
+    // It has to stand on DRY cells: a post over even 0.2 m of water never reaches terrain,
+    // so support propagation would quietly delete its whole column and leave the crossbeam
+    // hanging off one leg.
+    out.push(...dryingFrame('wood', ox + 2, oz - 5, 0, 5, 3));
 
     // Net store: a small shed beside the cabin, one way in.
     out.push(...room('wood', ox + 4, oz + 1, 2, 2, 0, {
@@ -497,6 +596,17 @@ const BLUEPRINTS = {
       ]
     }));
     out.push(...flatRoof('metal', ox - 5, oz + 1, 3, 3, 1, { parapet: true }));
+
+    // Loading gantry (§21.1): the yard's vertical anchor. Two legs well apart with a railed
+    // catwalk spanning between them, standing clear of the sheds on the open south side, so
+    // the yard still runs underneath it and the warehouse fight is untouched. There is no
+    // stair up — it is a silhouette and a piece of cover, not a tower to hold.
+    out.push(...gantry('metal', ox - 2, oz + 4, 0, 5, 6));
+
+    // Rooftop utility box on the main warehouse: a small second read that keeps the roofline
+    // from being one flat grey band.
+    out.push(...room('metal', ox + 1, oz + 1, 2, 1, 3));
+    out.push(...slab('metal', ox + 1, oz + 1, 2, 1, 4));
 
     // Container stacks: the yard's hard cover, at two heights so it plays in three
     // dimensions rather than as a maze of equal boxes.
@@ -727,7 +837,10 @@ export function originFor(poi, terrain) {
 function footprintOf(blueprint) {
   const seen = new Set();
   const cells = [];
-  for (const p of blueprint(0, 0)) {
+  // The widest shape the blueprint can take. A terrain-aware blueprint shortens itself on
+  // some sites (Riverwatch's boardwalk stops at the bank), and the pad has to cover the
+  // longest version or a POI on flatter ground would overrun its own level ground.
+  for (const p of blueprint(0, 0, { waterStorey: 0, groundStoreyAt: () => 0 })) {
     const key = `${p.cell.cx},${p.cell.cz}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -753,8 +866,14 @@ export function resolveStructures(pois, terrain) {
 
     // Where the waterline sits relative to this POI's base storey (see the blueprint docs).
     const waterStorey = Math.ceil(SEA_LEVEL / WALL_H) - baseStorey;
+    // The ground storey under one of the blueprint's own cells, relative to its base. Lets a
+    // blueprint found a piece on the ground it actually stands over instead of assuming the
+    // site is flat — which is what put Riverwatch's boardwalk inside the far bank.
+    const groundStoreyAt = (dx, dz) => (
+      Math.round(groundOfCell(terrain, ox + dx, oz + dz) / WALL_H) - baseStorey
+    );
 
-    for (const p of blueprint(ox, oz, { waterStorey })) {
+    for (const p of blueprint(ox, oz, { waterStorey, groundStoreyAt })) {
       out.push({
         type: p.type,
         material: p.material,
